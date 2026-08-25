@@ -1,0 +1,12 @@
+{
+  "projectId": "automarket-fintech",
+  "appId": "1:153173040202:web:40558026c87f8f7a739ab3",
+  "apiKey": "AIzaSyA0JtXL4msd5O8bq8hD2vMKCZGgmwhldWY",
+  "authDomain": "automarket-fintech.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "automarket-fintech.firebasestorage.app",
+  "messagingSenderId": "153173040202",
+  "measurementId": "G-2ZN9TZ2B1K",
+  "oAuthClientId": "",
+  "recaptchaSiteKey": ""
+}

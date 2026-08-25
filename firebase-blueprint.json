@@ -1,0 +1,152 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role, optional agency affiliation and PIN",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string" },
+        "avatar": { "type": "string" },
+        "role": { 
+          "type": "string", 
+          "enum": ["client", "admin_general", "chef_agence", "designer_graphique", "livreur"] 
+        },
+        "agencyId": { "type": "string" },
+        "agencyName": { "type": "string" },
+        "pinHash": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "UserCard": {
+      "title": "UserCard",
+      "description": "Card belonging to user or created in library",
+      "type": "object",
+      "properties": {
+        "cardId": { "type": "string" },
+        "userId": { "type": "string" },
+        "cardNumber": { "type": "string" },
+        "cardHolder": { "type": "string" },
+        "expiry": { "type": "string" },
+        "cvv": { "type": "string" },
+        "network": { "type": "string" },
+        "type": { "type": "string", "enum": ["virtual", "physical"] },
+        "saleStatus": { "type": "string", "enum": ["pending", "confirmed", "sold", "cancelled"] },
+        "printStatus": { "type": "string", "enum": ["pending", "printed"] },
+        "status": { "type": "string", "enum": ["active", "blocked"] },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["cardId", "cardNumber", "cardHolder", "status"]
+    },
+    "CardPurchaseRequest": {
+      "title": "CardPurchaseRequest",
+      "description": "User card purchase request with payment proof",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "userPhone": { "type": "string" },
+        "cardId": { "type": "string" },
+        "cardName": { "type": "string" },
+        "amount": { "type": "number" },
+        "currency": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "transactionReference": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "userId", "cardId", "amount", "status"]
+    },
+    "PhysicalCardRequest": {
+      "title": "PhysicalCardRequest",
+      "description": "Physical card order with delivery details and tracking",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "cardId": { "type": "string" },
+        "cardIdentifier": { "type": "string" },
+        "cardHolder": { "type": "string" },
+        "deliveryDate": { "type": "string" },
+        "deliveryAddress": { "type": "string" },
+        "whatsapp": { "type": "string" },
+        "status": { 
+          "type": "string", 
+          "enum": ["pending", "assigned", "in_progress", "out_for_delivery", "delivered", "reported", "cancelled"] 
+        },
+        "assignedLivreurId": { "type": "string" },
+        "assignedLivreurName": { "type": "string" },
+        "assignedLivreurPhone": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "userId", "cardId", "deliveryDate", "deliveryAddress", "whatsapp", "status"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "In-app notifications for users regarding card status updates and alerts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "targetRole": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["success", "error", "info"] },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "userId", "title", "message", "type", "read", "createdAt"]
+    },
+    "HelpArticle": {
+      "title": "HelpArticle",
+      "description": "Frequently asked questions and support guides",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "question": { "type": "string" },
+        "answer": { "type": "string" },
+        "category": { "type": "string" },
+        "active": { "type": "boolean" },
+        "order": { "type": "number" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "question", "answer"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles with role and agency affiliation"
+    },
+    "/cards/{cardId}": {
+      "schema": { "$ref": "#/entities/UserCard" },
+      "description": "Cards inventory and library"
+    },
+    "/card_purchase_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/CardPurchaseRequest" },
+      "description": "Card purchase requests submitted by clients"
+    },
+    "/physical_card_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/PhysicalCardRequest" },
+      "description": "Physical card delivery requests and tracking"
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "In-app notifications"
+    },
+    "/help_articles/{articleId}": {
+      "schema": { "$ref": "#/entities/HelpArticle" },
+      "description": "Help center FAQs and articles"
+    }
+  }
+}

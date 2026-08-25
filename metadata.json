@@ -1,0 +1,7 @@
+{
+  "name": "Market-Cash",
+  "description": "Application web complète Market-Cash pour l'achat et la gestion de cartes virtuelles et physiques.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

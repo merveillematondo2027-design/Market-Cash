@@ -1,0 +1,62 @@
+rules_version = '2';
+
+// Firebase Storage Security Rules for Market-Cash
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email in ["merveillematondo2027@gmail.com", "emmanuelmungwele1@gmail.com"]
+      );
+    }
+
+    // ==========================================
+    // PAYMENT PROOFS (Demandes d'achat de cartes)
+    // ==========================================
+    match /payment-proofs/{userId}/{fileName} {
+      allow read: if isOwner(userId) || isSignedIn();
+      allow write: if isOwner(userId)
+        && request.resource.size <= 8 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp|jpg|pdf)');
+    }
+
+    match /market-cash/purchase-proofs/{userId}/{fileName} {
+      allow read: if isOwner(userId) || isSignedIn();
+      allow write: if isOwner(userId)
+        && request.resource.size <= 8 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp|jpg|pdf)');
+    }
+
+    // ==========================================
+    // PVC CARDS & DESIGNS (Atelier Designer / Production)
+    // ==========================================
+    match /card-designs/{cardId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn()
+        && request.resource.size <= 12 * 1024 * 1024;
+    }
+
+    // ==========================================
+    // USER AVATARS & ID PROOFS
+    // ==========================================
+    match /avatars/{userId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isOwner(userId)
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp|jpg)');
+    }
+
+    // Default deny for unlisted paths
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
