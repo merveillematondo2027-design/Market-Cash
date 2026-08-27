@@ -71,7 +71,7 @@ export default function CardLibrary() {
 
   useEffect(() => {
     // Real-time listener for cards
-    const qCards = query(collection(db, 'cards'));
+    const qCards = query(collection(db, 'cards'), where('saleStatus', 'in', ['sold', 'delivered', 'cancelled', 'confirmed']));
     const unsubscribe = onSnapshot(qCards, (snap) => {
       const allDocs = snap.docs
         .map(d => ({ ...d.data(), id: d.id, cardId: d.id } as UserCard))

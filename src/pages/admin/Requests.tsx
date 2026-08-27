@@ -72,6 +72,8 @@ export default function AdminRequests() {
   // Rejection Form
   const [rejectionReason, setRejectionReason] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [stockCounts, setStockCounts] = useState({ virtual: 0, physical: 0 });
+
   
   const [actionType, setActionType] = useState<'approve' | 'reject' | null>(null);
 
@@ -83,7 +85,11 @@ export default function AdminRequests() {
     const unsubPurchases = onSnapshot(qPurchases, (snap) => {
       const docs = snap.docs
         .map(d => ({ ...d.data(), id: d.id } as CardPurchaseRequest))
-        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        .sort((a, b) => {
+          if (a.isUrgent && !b.isUrgent) return -1;
+          if (!a.isUrgent && b.isUrgent) return 1;
+          return (b.createdAt || 0) - (a.createdAt || 0);
+        });
       setRequests(docs);
       setLoading(false);
     }, (err) => {
@@ -96,7 +102,11 @@ export default function AdminRequests() {
     const unsubDeliveries = onSnapshot(qDeliveries, (snap) => {
       const docs = snap.docs
         .map(d => ({ ...d.data(), id: d.id } as PhysicalCardRequest))
-        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        .sort((a, b) => {
+          if (a.isUrgent && !b.isUrgent) return -1;
+          if (!a.isUrgent && b.isUrgent) return 1;
+          return (b.createdAt || 0) - (a.createdAt || 0);
+        });
       setDeliveryRequests(docs);
     }, (err) => {
       console.error('[ADMIN_DELIVERIES_ERROR]', err);
@@ -172,88 +182,36 @@ export default function AdminRequests() {
     setActionType('approve');
   };
 
-  const handleApprove = async (e: React.FormEvent) => {
-    e.preventDefault();
+  
+  
+  const handleApprove = async () => {
     if (!selectedRequest || !user) return;
     
     setIsProcessing(true);
     try {
-      if (cardForm.type === 'physical') {
-        // Full production physical card issue workflow
-        const newCard = await cardService.confirmAndIssuePhysicalCard({
-          userId: selectedRequest.userId,
-          userName: selectedRequest.userName || selectedRequest.fullName,
-          userEmail: selectedRequest.userEmail,
-          cardNumber: cardForm.cardNumber,
-          cardHolder: cardForm.cardHolder,
-          expiryStart: cardForm.expiryStart,
-          expiryEnd: cardForm.expiryEnd,
-          cvv: cardForm.cvv,
-          rechargeNumber: cardForm.rechargeNumber,
-          network: cardForm.network as any,
-          seller: {
-            uid: user.uid,
-            email: user.email,
-            role: user.role,
-            agencyId: user.agencyId,
-            agencyName: user.agencyName
-          },
-          requestId: selectedRequest.id
-        });
-
-        toast.success(`Carte physique ${newCard.cardIdentifier} validée et ajoutée à la bibliothèque !`);
-      } else {
-        // Virtual Card flow
-        const newCardId = doc(collection(db, 'cards')).id;
-        const cleanCardNumber = cardForm.cardNumber.replace(/\s+/g, '');
-
-        const newCard: UserCard = {
-          id: newCardId,
-          cardId: newCardId,
-          userId: selectedRequest.userId,
-          userName: selectedRequest.userName || selectedRequest.fullName,
-          userEmail: selectedRequest.userEmail,
-          type: 'virtual',
-          network: cardForm.network as any,
-          cardNumber: cleanCardNumber,
-          cardHolder: cardForm.cardHolder.trim(),
-          cardHolderName: cardForm.cardHolder.trim(),
-          expiryStart: cardForm.expiryStart.trim(),
-          expiryEnd: cardForm.expiryEnd.trim(),
-          expiry: cardForm.expiryEnd.trim(),
-          cvv: cardForm.cvv.trim(),
-          rechargeNumber: cardForm.rechargeNumber.trim() || undefined,
-          status: 'active',
-          createdAt: Date.now(),
-          updatedAt: Date.now()
-        };
-
-        await setDoc(doc(db, 'cards', newCardId), removeUndefined(newCard));
-        
-        await updateDoc(doc(db, 'card_purchase_requests', selectedRequest.id), {
-          status: 'approved',
-          assignedCardId: newCardId,
-          processedAt: Date.now(),
-          processedBy: user.email
-        });
-
-        await cardService.createNotification({
-          userId: selectedRequest.userId,
-          title: `Demande approuvée : ${selectedRequest.cardName}`,
-          message: `Félicitations ! Votre carte ${selectedRequest.cardName} est désormais active. Vos identifiants sont accessibles dans votre espace Mes Cartes.`,
-          type: 'success',
-          requestId: selectedRequest.id,
-          cardName: selectedRequest.cardName
-        });
-
-        toast.success('Demande approuvée et carte virtuelle activée avec succès.');
-      }
+      const type = selectedRequest.cardType || 'virtual';
+      const assignedCard = await cardService.approveRequestWithStock(selectedRequest.id, type, { uid: user.uid, email: user.email! });
+      
+      toast.success(`Carte ${type} ${assignedCard.cardIdentifier} attribuée avec succès !`);
+      
+      await cardService.createNotification({
+        userId: selectedRequest.userId,
+        title: 'Paiement vérifié & Carte Attribuée 🎉',
+        message: `Votre paiement a été vérifié. Votre carte ${type === 'physical' ? 'physique' : 'virtuelle'} vous a été attribuée (ID: ${assignedCard.cardIdentifier}).`,
+        type: 'success',
+        requestId: selectedRequest.id,
+        cardIdentifier: assignedCard.cardIdentifier
+      });
 
       setSelectedRequest(null);
       setActionType(null);
     } catch (error: any) {
-      console.error('[APPROVE_ERROR]', error);
-      toast.error(`Erreur lors de l'approbation : ${error?.message || ''}`);
+      console.error(error);
+      if (error.message === 'STOCK_EMPTY') {
+        toast.error("STOCK ÉPUISÉ : Aucune carte disponible dans le stock.");
+      } else {
+        toast.error("Une erreur est survenue lors de l'attribution.");
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -320,6 +278,22 @@ export default function AdminRequests() {
       
       {/* Tarifs Section */}
       <div className="bg-white rounded-[2.5rem] border-4 border-slate-100/50 p-6 shadow-xl shadow-slate-200/40">
+        
+        {(stockCounts.virtual === 0 || stockCounts.physical === 0) && requests.length > 0 && (
+          <div className="mb-6 bg-red-50 border-l-4 border-red-500 p-4 rounded-r-2xl">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <AlertCircle className="h-5 w-5 text-red-500" />
+              </div>
+              <div className="ml-3">
+                <h3 className="text-sm font-bold text-red-800">🔴 STOCK ÉPUISÉ</h3>
+                <div className="mt-1 text-sm text-red-700">
+                  <p>Des demandes de cartes sont en attente, mais aucune carte n'est actuellement disponible dans le stock pour certains types. Ajoutez des cartes au stock avant de confirmer une nouvelle vente.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="flex justify-between items-center mb-6">
           <div>
             <h2 className="text-2xl font-black text-slate-800 tracking-tight">Configuration des Tarifs</h2>
@@ -435,7 +409,7 @@ export default function AdminRequests() {
                   <tr key={req.id} className="hover:bg-slate-50/80 transition">
                     <td className="p-4 text-xs font-semibold">{new Date(req.createdAt).toLocaleDateString('fr-FR')}</td>
                     <td className="p-4">
-                      <div className="font-bold text-slate-900">{req.userName || req.fullName}</div>
+                      <div className="font-bold text-slate-900">{req.userName || req.fullName} {req.physicalOption === 'urgent' && <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800">⚠️ PHYSIQUE URGENT</span>}</div>
                       <div className="text-xs text-slate-500">{req.userEmail} • {req.phone || req.userPhone}</div>
                     </td>
                     <td className="p-4 font-bold text-blue-600">{req.cardName}</td>
@@ -645,141 +619,43 @@ export default function AdminRequests() {
         </div>
       )}
 
+      
       {/* APPROVAL & CARD ATTRIBUTION MODAL */}
       {actionType === 'approve' && selectedRequest && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
-          <form onSubmit={handleApprove} className="bg-white rounded-[2.5rem] w-full max-w-lg p-8 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-            <h3 className="font-black text-2xl text-emerald-600 tracking-tight">Approuver & Activer la carte</h3>
-            <p className="text-xs font-medium text-slate-500">
-              Renseignez les informations de la carte attribuée à <strong>{selectedRequest.userName || selectedRequest.fullName}</strong>.
+          <div className="bg-white rounded-[2.5rem] w-full max-w-md p-8 shadow-2xl space-y-4">
+            <h3 className="font-black text-2xl text-emerald-600 tracking-tight">Approuver & Attribuer</h3>
+            <p className="text-sm font-medium text-slate-500">
+              Vous êtes sur le point de valider le paiement de <strong>{selectedRequest.userName || selectedRequest.fullName}</strong>.
             </p>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1 uppercase">Numéro de carte (16 chiffres)</label>
-                <input 
-                  required 
-                  type="text" 
-                  placeholder="Ex: 4585 0200 0025 8400"
-                  value={cardForm.cardNumber} 
-                  onChange={e => setCardForm({...cardForm, cardNumber: e.target.value})} 
-                  className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-mono font-bold text-slate-800 outline-none focus:border-blue-500" 
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1 uppercase">Nom du Titulaire sur la carte</label>
-                <input 
-                  required 
-                  type="text" 
-                  placeholder="Ex: Mardo Mungwele"
-                  value={cardForm.cardHolder} 
-                  onChange={e => setCardForm({...cardForm, cardHolder: e.target.value})} 
-                  className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold text-slate-800 outline-none focus:border-blue-500" 
-                />
-              </div>
-
-              {/* NUMÉRO DE RECHARGE (Nouveau champ Admin) */}
-              <div className="bg-amber-50/60 p-3.5 rounded-2xl border border-amber-200">
-                <label className="block text-xs font-black text-amber-900 mb-1 uppercase">Numéro de Recharge (Gestion Admin)</label>
-                <input 
-                  type="text" 
-                  placeholder="Ex: REC-8890-4421-99"
-                  value={cardForm.rechargeNumber} 
-                  onChange={e => setCardForm({...cardForm, rechargeNumber: e.target.value})} 
-                  className="w-full px-4 py-2.5 bg-white border border-amber-300 rounded-xl font-mono font-bold text-amber-900 outline-none focus:border-amber-500 text-sm" 
-                />
-                <span className="text-[10px] text-amber-700 font-medium block mt-1">
-                  Ce numéro est visible uniquement par le client lors du déverrouillage de sa carte.
-                </span>
-              </div>
-
-              {/* Expiration Début & Fin */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1 uppercase">Expiration Début</label>
-                  <input 
-                    required 
-                    type="text" 
-                    placeholder="02/27" 
-                    value={cardForm.expiryStart} 
-                    onChange={e => setCardForm({...cardForm, expiryStart: e.target.value})} 
-                    className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-mono text-center font-bold text-slate-800 outline-none focus:border-blue-500" 
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1 uppercase">Expiration Fin</label>
-                  <input 
-                    required 
-                    type="text" 
-                    placeholder="08/27" 
-                    value={cardForm.expiryEnd} 
-                    onChange={e => setCardForm({...cardForm, expiryEnd: e.target.value})} 
-                    className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-mono text-center font-bold text-slate-800 outline-none focus:border-blue-500" 
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1 uppercase">CVV</label>
-                  <input 
-                    required 
-                    type="text" 
-                    maxLength={4} 
-                    placeholder="551" 
-                    value={cardForm.cvv} 
-                    onChange={e => setCardForm({...cardForm, cvv: e.target.value})} 
-                    className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-mono text-center font-bold text-slate-800 outline-none focus:border-blue-500" 
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1 uppercase">Réseau</label>
-                  <select 
-                    value={cardForm.network} 
-                    onChange={e => setCardForm({...cardForm, network: e.target.value})} 
-                    className="w-full px-3 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold text-slate-800 outline-none focus:border-blue-500 text-xs"
-                  >
-                    <option value="visa">Visa</option>
-                    <option value="mastercard">Mastercard</option>
-                    <option value="amex">Amex</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1 uppercase">Type</label>
-                  <select 
-                    value={cardForm.type} 
-                    onChange={e => setCardForm({...cardForm, type: e.target.value})} 
-                    className="w-full px-3 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold text-slate-800 outline-none focus:border-blue-500 text-xs"
-                  >
-                    <option value="virtual">Virtuelle</option>
-                    <option value="physical">Physique</option>
-                  </select>
-                </div>
-              </div>
+            <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm font-medium">
+              Une carte <strong>{selectedRequest.cardType === 'physical' ? 'Physique' : 'Virtuelle'}</strong> sera automatiquement piochée dans le stock et attribuée à ce client.
             </div>
-
-            <div className="flex space-x-3 pt-4">
+            
+            <div className="flex gap-3 pt-4">
               <button 
-                type="button" 
                 onClick={() => setActionType(null)} 
-                className="flex-1 py-3.5 rounded-2xl bg-slate-100 text-slate-700 font-bold hover:bg-slate-200 transition-colors cursor-pointer text-sm"
+                className="flex-1 bg-slate-100 text-slate-600 py-3 rounded-xl font-bold hover:bg-slate-200 transition"
+                disabled={isProcessing}
               >
                 Annuler
               </button>
               <button 
-                type="submit" 
-                disabled={isProcessing} 
-                className="flex-1 py-3.5 rounded-2xl bg-emerald-600 text-white font-black tracking-wide hover:bg-emerald-500 transition-colors disabled:opacity-50 shadow-lg shadow-emerald-600/30 cursor-pointer text-sm"
+                onClick={handleApprove}
+                disabled={isProcessing}
+                className="flex-1 bg-emerald-600 text-white py-3 rounded-xl font-black hover:bg-emerald-700 transition flex justify-center items-center"
               >
-                {isProcessing ? 'Attribution...' : 'Confirmer & Attribuer'}
+                {isProcessing ? (
+                   <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                ) : (
+                  <>Confirmer l'attribution</>
+                )}
               </button>
             </div>
-          </form>
+          </div>
         </div>
       )}
-
-      {/* REJECTION MODAL */}
+  {/* REJECTION MODAL */}
       {actionType === 'reject' && selectedRequest && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
           <form onSubmit={handleReject} className="bg-white rounded-[2.5rem] w-full max-w-md p-8 shadow-2xl space-y-4">

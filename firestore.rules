@@ -1,83 +1,57 @@
 rules_version = '2';
-
 service cloud.firestore {
-
   match /databases/{database}/documents {
-
+    
     // ==========================================
     // AUTHENTICATION & ROLE-BASED ACCESS CONTROL
     // ==========================================
-
     function isSignedIn() {
       return request.auth != null;
     }
-
+    
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    function hasUserDoc() {
-      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
-    }
-
-    function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-    }
-
     function getUserRole() {
-      return hasUserDoc() && ('role' in getUserData())
-        ? getUserData().role
-        : 'client';
-    }
-
-    function getUserAgencyId() {
-      return hasUserDoc() && ('agencyId' in getUserData())
-        ? getUserData().agencyId
-        : '';
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
 
     function isAdminGeneral() {
       return isSignedIn() && (
         (request.auth.token != null && (request.auth.token.email == 'merveillematondo2027@gmail.com' || request.auth.token.email == 'emmanuelmungwele1@gmail.com')) ||
-        getUserRole() in ['admin_general', 'admin']
+        getUserRole() == 'admin_general' || getUserRole() == 'admin'
       );
     }
 
     function isChefAgence() {
       return isSignedIn() && (
         isAdminGeneral() ||
-        getUserRole() in ['chef_agence', 'chef']
+        getUserRole() == 'chef_agence' || getUserRole() == 'chef'
       );
     }
 
     function isDesignerGraphique() {
       return isSignedIn() && (
         isAdminGeneral() ||
-        getUserRole() in ['designer_graphique', 'designer']
+        getUserRole() == 'designer_graphique' || getUserRole() == 'designer'
       );
     }
 
     function isLivreur() {
       return isSignedIn() && (
         isAdminGeneral() ||
-        getUserRole() in ['livreur', 'delivery']
+        getUserRole() == 'livreur' || getUserRole() == 'delivery'
       );
     }
 
     function isStaff() {
-      return isSignedIn() && (
-        isAdminGeneral() ||
-        isChefAgence() ||
-        isDesignerGraphique() ||
-        isLivreur()
-      );
+      return isAdminGeneral() || isChefAgence() || isDesignerGraphique() || isLivreur();
     }
-
 
     // ==============================
     // APP & PAYMENT SETTINGS
     // ==============================
-
     match /app_settings/{settingId} {
       allow read: if isSignedIn();
       allow write: if isAdminGeneral();
@@ -88,233 +62,157 @@ service cloud.firestore {
       allow write: if isAdminGeneral();
     }
 
-
     // ==============================
     // COUNTERS (Card ID generator)
     // ==============================
-
     match /counters/{counterId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if isSignedIn(); // We can make it tighter later if needed, but atomicity requires write access
     }
-
 
     // ==============================
     // USERS
     // ==============================
-
     match /users/{userId} {
-
       // Lecture : l'utilisateur lit son propre profil. Le staff lit pour les opérations métiers.
       allow read: if isOwner(userId) || isStaff();
-
-      // Création : Un client crée son profil avec rôle "client". L'Admin Général peut créer tout profil.
-      allow create: if
+      
+      // Création : Un client crée son profil
+      allow create: if isOwner(userId) || isAdminGeneral();
+      
+      // Modification : Le client modifie ses infos sans changer son rôle ni son uid
+      allow update: if 
         (
-          isOwner(userId)
-          && request.resource.data.uid == request.auth.uid
-        )
-        ||
-        isAdminGeneral();
-
-      // Modification : Le client modifie ses infos sans changer son rôle ni son uid. Seul l'Admin Général peut changer les rôles.
-      allow update: if
-        (
-          isOwner(userId)
-          && request.resource.data.uid == request.auth.uid
+          isOwner(userId) 
+          && request.resource.data.uid == request.auth.uid 
           && request.resource.data.role == resource.data.role
         )
-        ||
-        isAdminGeneral();
-
+        || isAdminGeneral();
+        
       // Suppression réservée à l'administrateur général.
       allow delete: if isAdminGeneral();
-
-
-      // ==============================
-      // USER CARDS SUBCOLLECTION
-      // ==============================
-
+      
       match /cards/{cardId} {
         allow read: if isOwner(userId) || isChefAgence();
         allow write: if isChefAgence();
       }
     }
 
-
     // ==============================
-    // CARDS (Production & Issued Library)
+    // CARDS (Stock & Assigned)
     // ==============================
-
     match /cards/{cardId} {
-
-      // Lecture :
-      // - Le client lit uniquement ses propres cartes
-      // - Admin Général, Chef d'Agence et Designer Graphique peuvent lire
-      allow read: if
-        (
-          isSignedIn()
-          && resource.data.userId == request.auth.uid
-        )
-        ||
-        isChefAgence()
-        ||
-        isDesignerGraphique();
-
-      // Création : Admin Général et Chef d'Agence
+      // Un client peut voir une carte si elle lui est assignée.
+      // Le staff (Chef, Designer, Admin) a un accès complet en lecture pour la gestion.
+      allow read: if 
+        (isSignedIn() && resource.data.userId == request.auth.uid) || 
+        isStaff();
+        
+      // Création : Admin et Chef d'Agence pour l'ajout au stock
       allow create: if isChefAgence();
-
-      // Suppression : Seul l'Administrateur Général
+      
+      // Suppression : Admin Général uniquement
       allow delete: if isAdminGeneral();
-
-      // Modification :
-      // - Admin Général et Chef d'Agence : complet
-      // - Designer Graphique : uniquement les champs d'impression
-      allow update: if
-        isChefAgence()
-        ||
+      
+      // Modification : 
+      // - Chef d'Agence & Admin : complet (attribution, statut, etc)
+      // - Designer : uniquement les informations d'impression
+      allow update: if 
+        isChefAgence() ||
         (
-          isDesignerGraphique()
-          && request.resource.data.diff(resource.data)
-              .affectedKeys()
-              .hasOnly(['printStatus', 'printedAt', 'printedBy', 'updatedAt', 'printFileUrl', 'cardDesignUrl'])
+          isDesignerGraphique() &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['printStatus', 'printedAt', 'printedBy', 'updatedAt', 'printFileUrl', 'cardDesignUrl', 'designUrl'])
+        ) ||
+        (
+          isSignedIn() && resource.data.userId == request.auth.uid &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) 
         );
     }
-
 
     // ==============================
     // CARD PURCHASE REQUESTS
     // ==============================
-
     match /card_purchase_requests/{requestId} {
-
-      // Lecture :
-      // - Le client lit uniquement ses propres demandes
-      // - Admin Général et Chef d'Agence peuvent lire
-      allow read: if
-        (
-          isSignedIn()
-          && resource.data.userId == request.auth.uid
-        )
-        ||
+      // Le client voit ses demandes, le Chef et Admin voient tout
+      allow read: if 
+        (isSignedIn() && resource.data.userId == request.auth.uid) || 
         isChefAgence();
-
-      // Création : Un client connecté crée une demande
-      allow create: if
-        (
-          isSignedIn()
-          && request.resource.data.userId == request.auth.uid
-        )
-        ||
-        isChefAgence();
-
-      // Modification : Admin Général et Chef d'Agence
+        
+      // Création par le client
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      
+      // Chef d'Agence peut modifier (approuver, rejeter)
       allow update: if isChefAgence();
-
-      // Suppression : Seul l'Administrateur Général
+      
       allow delete: if isAdminGeneral();
     }
-
 
     // ==============================
     // PHYSICAL CARD DELIVERY REQUESTS
     // ==============================
-
     match /physical_card_requests/{requestId} {
-
-      // Lecture :
-      // - Le client lit uniquement ses propres commandes
-      // - Admin Général, Chef d'Agence, Designer Graphique et Livreur peuvent lire
-      allow read: if
+      // Le client voit ses commandes. Le staff les gère.
+      allow read: if 
+        (isSignedIn() && resource.data.userId == request.auth.uid) || 
+        isStaff();
+        
+      // Le client peut créer une demande de carte physique
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      
+      // L'Admin et Chef d'Agence peuvent tout modifier
+      // Le Designer peut marquer comme imprimé
+      // Le Livreur peut marquer comme livré
+      allow update: if 
+        isChefAgence() ||
         (
-          isSignedIn()
-          && resource.data.userId == request.auth.uid
-        )
-        ||
-        isChefAgence()
-        ||
-        isDesignerGraphique()
-        ||
-        isLivreur();
-
-      // Création :
-      // - Le client crée sa commande
-      // - Admin Général et Chef d'Agence
-      allow create: if
+          isDesignerGraphique() && 
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'printedAt', 'updatedAt'])
+        ) ||
         (
-          isSignedIn()
-          && request.resource.data.userId == request.auth.uid
-        )
-        ||
-        isChefAgence();
-
-      // Modification :
-      // - Admin Général et Chef d'Agence : gestion & attribution
-      // - Livreur : mise à jour du statut, dates, et rapports de remise
-      allow update: if
-        isChefAgence()
-        ||
-        (
-          isLivreur()
-          && (
-            resource.data.assignedLivreurId == request.auth.uid
-            || resource.data.status == "pending"
-            || request.resource.data.assignedLivreurId == request.auth.uid
-          )
+          isLivreur() && 
+          (resource.data.assignedLivreurId == request.auth.uid || request.resource.data.assignedLivreurId == request.auth.uid || resource.data.status == 'pending') &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'deliveredAt', 'updatedAt', 'assignedLivreurId'])
         );
-
-      // Suppression réservée à l'administrateur général
+        
       allow delete: if isAdminGeneral();
     }
-
 
     // ==============================
     // NOTIFICATIONS
     // ==============================
-
     match /notifications/{notificationId} {
-
-      // Lecture : l'utilisateur lit ses notifications ou notifications de son rôle
-      allow read: if
+      allow read: if 
         isSignedIn() && (
-          resource.data.userId == request.auth.uid
-          || resource.data.userId == getUserRole()
-          || resource.data.userId == 'all'
-          || (('targetRole' in resource.data) && (resource.data.targetRole == getUserRole() || resource.data.targetRole == 'all'))
-          || isChefAgence()
+          resource.data.userId == request.auth.uid || 
+          resource.data.userId == 'all' || 
+          isChefAgence()
         );
-
-      // Création : Tout utilisateur connecté
+      
       allow create: if isSignedIn();
-
-      // Modification : Marquage comme lue
-      allow update: if
-        isSignedIn() && (
-          resource.data.userId == request.auth.uid
-          || isStaff()
-        );
-
-      // Suppression
-      allow delete: if
-        isSignedIn() && (
-          resource.data.userId == request.auth.uid
-          || isAdminGeneral()
-        );
+      
+      allow update: if 
+        isSignedIn() && (resource.data.userId == request.auth.uid || isStaff());
+        
+      allow delete: if isAdminGeneral();
     }
-
 
     // ==============================
     // HELP ARTICLES
     // ==============================
-
     match /help_articles/{articleId} {
       allow read: if isSignedIn();
       allow write: if isAdminGeneral();
     }
 
-
+    
     // ==============================
-    // DEFAULT DENY
+    // APP LOGS
     // ==============================
+    match /appLogs/{logId} {
+      allow read, delete: if isAdminGeneral();
+      allow create: if request.resource.data.keys().hasAll(['timestamp', 'level', 'category', 'event', 'message']) 
+                    && request.resource.data.level in ['INFO', 'SUCCESS', 'WARNING', 'ERROR', 'CRITICAL'];
+      allow update: if false;
+    }
 
     match /{document=**} {
       allow read, write: if false;

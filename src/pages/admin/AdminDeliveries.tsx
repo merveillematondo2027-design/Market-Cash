@@ -41,7 +41,11 @@ export default function AdminDeliveries() {
     const unsub = onSnapshot(qDeliveries, (snap) => {
       const docs = snap.docs
         .map(d => ({ ...d.data(), id: d.id } as PhysicalCardRequest))
-        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        .sort((a, b) => {
+          if (a.isUrgent && !b.isUrgent) return -1;
+          if (!a.isUrgent && b.isUrgent) return 1;
+          return (b.createdAt || 0) - (a.createdAt || 0);
+        });
       
       setDeliveries(docs);
       setLoading(false);

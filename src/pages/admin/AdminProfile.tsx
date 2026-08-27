@@ -1,36 +1,11 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuthStore } from '../../store/authStore';
-import { cardService, CardPricingSettings } from '../../services/cardService';
-import { PaymentMethodItem } from '../../types';
-import { 
-  User, 
-  LogOut, 
-  Settings, 
-  DollarSign, 
-  CreditCard, 
-  Smartphone, 
-  Plus, 
-  Edit3, 
-  Trash2, 
-  Check, 
-  X, 
-  Save, 
-  ShieldCheck, 
-  HelpCircle, 
-  Bell, 
-  Palette, 
-  Sparkles, 
-  Server, 
-  Lock, 
-  ExternalLink,
-  ChevronRight,
-  AlertCircle,
-  ToggleLeft,
-  ToggleRight,
-  Copy,
-  Info
-} from 'lucide-react';
+import { LogsCenter } from './LogsCenter';
+import {   useState, useEffect } from 'react';
+import {  useNavigate } from 'react-router-dom';
+import {  useAuthStore } from '../../store/authStore';
+import {  cardService, CardPricingSettings } from '../../services/cardService';
+import {  PaymentMethodItem } from '../../types';
+import {  
+  User, LogOut, Settings, DollarSign, CreditCard, Smartphone, Plus, Edit3, Trash2, Check, X, Save, ShieldCheck, HelpCircle, Bell, Palette, Sparkles, Server, Lock, ExternalLink, ChevronRight, AlertCircle, ToggleLeft, ToggleRight, Copy, Info, Image as ImageIcon } from 'lucide-react';
 import LogoutModal from '../../components/LogoutModal';
 import toast from 'react-hot-toast';
 
@@ -38,11 +13,14 @@ export default function AdminProfile() {
   const { user } = useAuthStore();
   const navigate = useNavigate();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<'app_settings' | 'system_settings'>('app_settings');
+  const [urgentPriceInput, setUrgentPriceInput] = useState('15');
+  const [activeTab, setActiveTab] = useState<'app_settings' | 'system_settings' | 'logs'>('app_settings');
+  const isSuperAdmin = user?.role === 'admin_general';
 
   // Pricing State
   const [pricing, setPricing] = useState<CardPricingSettings>({
     virtualCardPrice: null,
+      urgentPhysicalCardPrice: null,
     physicalCardPrice: null,
     currency: 'USD'
   });
@@ -61,6 +39,7 @@ export default function AdminProfile() {
     const unsubPricing = cardService.subscribePricing((p) => {
       setPricing(p);
       setVirtualPriceInput(p.virtualCardPrice !== null ? String(p.virtualCardPrice) : '');
+        setUrgentPriceInput(p.urgentPhysicalCardPrice !== null ? String(p.urgentPhysicalCardPrice) : '');
       setPhysicalPriceInput(p.physicalCardPrice !== null ? String(p.physicalCardPrice) : '');
       setCurrencyInput(p.currency || 'USD');
     });
@@ -101,6 +80,7 @@ export default function AdminProfile() {
       await cardService.updatePricing({
         virtualCardPrice: vPrice,
         physicalCardPrice: pPrice,
+        urgentPhysicalCardPrice: urgentPriceInput,
         currency: currencyInput.trim() || 'USD'
       });
       toast.success('Tarifs des cartes enregistrés avec succès dans Firestore !');
@@ -148,6 +128,7 @@ export default function AdminProfile() {
       await cardService.addOrUpdatePaymentMethod(methodToSave);
       toast.success('Moyen de paiement enregistré avec succès !');
       setEditingMethod(null);
+  const isSuperAdmin = user?.role === 'admin_general';
     } catch (err: any) {
       console.error('[PAYMENT_METHOD_SAVE_ERROR]', err);
       toast.error(`Erreur : ${err?.message || 'Impossible de sauvegarder'}`);
@@ -251,13 +232,49 @@ export default function AdminProfile() {
           >
             2. Paramètres système
           </button>
+          {isSuperAdmin && (
+            <button
+              onClick={() => setActiveTab('logs')}
+              className={`py-2.5 px-4 font-bold text-xs uppercase tracking-wider rounded-xl transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                activeTab === 'logs' 
+                  ? 'bg-blue-950 text-amber-400 shadow-md' 
+                  : 'bg-white text-slate-500 hover:bg-slate-50 border border-slate-200'
+              }`}
+            >
+              <Activity size={14} /> Centre de logs
+            </button>
+          )}
+
         </div>
 
         {/* CATÉGORIE 1 : PARAMÈTRES DE L'APPLICATION */}
         {activeTab === 'app_settings' && (
           <div className="space-y-6 animate-in fade-in">
             {/* SECTION 1.1 : PRIX DES CARTES (VIRTUELLE & PHYSIQUE) */}
-            <div className="bg-white rounded-[2rem] p-6 sm:p-8 border border-slate-200/90 shadow-sm space-y-5">
+            
+            {/* SECTION 1.3 : DESIGNER DE CARTES */}
+            <div className="bg-gradient-to-r from-pink-500 to-rose-500 rounded-[2rem] p-6 sm:p-8 text-white shadow-lg space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center font-bold">
+                    <ImageIcon size={24} />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-black text-white">Designer de Cartes (Canva-like)</h2>
+                    <p className="text-sm text-pink-100 mt-1">Créez et modifiez l'apparence des cartes physiques et virtuelles.</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => navigate('/admin/designer')}
+                  className="bg-white text-pink-600 hover:bg-pink-50 font-black py-3 px-6 rounded-xl transition cursor-pointer shadow-md shrink-0 flex items-center justify-center gap-2"
+                >
+                  <Sparkles size={18} /> Ouvrir le Designer
+                </button>
+              </div>
+            </div>
+
+
+<div className="bg-white rounded-[2rem] p-6 sm:p-8 border border-slate-200/90 shadow-sm space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold">
@@ -301,6 +318,21 @@ export default function AdminProfile() {
                   <span className="text-[10px] text-slate-400 mt-1 block">Laissez vide pour désactiver l'achat</span>
                 </div>
 
+                
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
+                    Prix Carte Physique Urgente (USD)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={urgentPriceInput}
+                    onChange={e => setUrgentPriceInput(e.target.value)}
+                    className="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-blue-50 outline-none transition-all font-semibold text-slate-800 text-sm"
+                    placeholder="Ex: 10"
+                  />
+                </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
                     Prix Carte Physique (USD)
@@ -551,6 +583,13 @@ export default function AdminProfile() {
             </div>
           </div>
         )}
+
+        {activeTab === 'logs' && isSuperAdmin && (
+          <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <LogsCenter />
+          </div>
+        )}
+
       </div>
 
       {/* EDIT / ADD PAYMENT METHOD MODAL */}

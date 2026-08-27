@@ -1,7 +1,27 @@
+import { logService } from './services/logService';
 import React, { StrictMode, ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+
+// Capture global errors
+window.addEventListener('error', (event) => {
+  logService.critical('SYSTEM', 'JAVASCRIPT_ERROR', event.error || new Error(event.message), {
+    route: window.location.pathname,
+    metadata: {
+      filename: event.filename,
+      lineno: event.lineno,
+      colno: event.colno
+    }
+  });
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  logService.critical('SYSTEM', 'UNHANDLED_PROMISE_REJECTION', event.reason, {
+    route: window.location.pathname
+  });
+});
+
 
 interface ErrorBoundaryProps {
   children: ReactNode;

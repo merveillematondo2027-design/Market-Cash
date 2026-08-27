@@ -20,6 +20,7 @@ export default function AdminCards() {
 
   // Issued User Cards
   const [issuedCards, setIssuedCards] = useState<UserCard[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedUserCard, setSelectedUserCard] = useState<UserCard | null>(null);
   const [userCardForm, setUserCardForm] = useState({
     cardNumber: '',
@@ -139,6 +140,19 @@ export default function AdminCards() {
     }
   };
 
+  const filteredIssuedCards = issuedCards.filter(card => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      (card.cardIdentifier && card.cardIdentifier.toLowerCase().includes(q)) ||
+      (card.cardHolder && card.cardHolder.toLowerCase().includes(q)) ||
+      (card.userName && card.userName.toLowerCase().includes(q)) ||
+      (card.userId && card.userId.toLowerCase().includes(q)) ||
+      (card.userEmail && card.userEmail.toLowerCase().includes(q)) ||
+      (card.cardNumber && card.cardNumber.includes(q))
+    );
+  });
+
   if (loading) return <div className="p-8 text-center text-slate-500 font-bold">Chargement des cartes...</div>;
 
   return (
@@ -161,7 +175,7 @@ export default function AdminCards() {
           }`}
         >
           <CreditCard size={20} />
-          <span>Cartes Émises aux Clients ({issuedCards.length})</span>
+          <span>Cartes Émises aux Clients ({filteredIssuedCards.length})</span>
         </button>
 
         <button
@@ -180,13 +194,38 @@ export default function AdminCards() {
       {/* TAB 1: ISSUED CLIENT CARDS */}
       {activeTab === 'issued' && (
         <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Rechercher une carte par ID, nom ou Gmail..."
+                className="w-full pl-4 pr-10 py-3 bg-white border border-slate-200 rounded-2xl focus:border-blue-500 outline-none font-medium text-sm text-slate-800"
+              />
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              </div>
+            </div>
+            <button 
+              onClick={() => {
+                const id = prompt('Scannez ou entrez l\'ID unique de la carte (ex: MC-00120260825)');
+                if (id) setSearchQuery(id);
+              }}
+              className="flex items-center justify-center gap-2 px-4 py-3 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-2xl text-sm transition"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7V4h3"></path><path d="M4 17v3h3"></path><path d="M20 17v3h-3"></path><path d="M20 7V4h-3"></path><rect x="9" y="9" width="6" height="6" rx="1"></rect></svg>
+              <span>Scanner une carte</span>
+            </button>
+          </div>
+          
           <div className="bg-white rounded-[2.5rem] border-4 border-slate-100/50 overflow-hidden shadow-xl shadow-slate-200/40 p-3">
             <div className="overflow-x-auto rounded-[1.5rem]">
               <table className="w-full text-left text-sm text-slate-600">
                 <thead className="bg-slate-50 text-slate-800 border-b border-slate-200">
                   <tr>
                     <th className="p-4 font-bold text-xs uppercase tracking-wider">Client</th>
-                    <th className="p-4 font-bold text-xs uppercase tracking-wider">Numéro de carte</th>
+                    <th className="p-4 font-bold text-xs uppercase tracking-wider">ID & Numéro</th>
                     <th className="p-4 font-bold text-xs uppercase tracking-wider">N° Recharge</th>
                     <th className="p-4 font-bold text-xs uppercase tracking-wider">Expiration</th>
                     <th className="p-4 font-bold text-xs uppercase tracking-wider">CVV</th>
@@ -195,14 +234,19 @@ export default function AdminCards() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {issuedCards.map(card => (
+                  {filteredIssuedCards.map(card => (
                     <tr key={card.cardId || card.id} className="hover:bg-slate-50/80 transition">
                       <td className="p-4">
                         <div className="font-bold text-slate-900">{card.cardHolder || card.userName || 'Client'}</div>
                         <div className="text-xs text-slate-500">{card.userEmail || card.userId}</div>
                       </td>
-                      <td className="p-4 font-mono font-bold text-slate-800">
-                        {card.cardNumber?.replace(/(\d{4})(?=\d)/g, '$1 ') || '•••• •••• •••• ••••'}
+                      <td className="p-4">
+                        <div className="font-mono text-[10px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-500 mb-1 inline-block">
+                          {card.cardIdentifier || 'MC-INCONNU'}
+                        </div>
+                        <div className="font-mono font-bold text-slate-800">
+                          {card.cardNumber?.replace(/(\d{4})(?=\d)/g, '$1 ') || '•••• •••• •••• ••••'}
+                        </div>
                       </td>
                       <td className="p-4">
                         {card.rechargeNumber ? (
@@ -236,9 +280,9 @@ export default function AdminCards() {
                       </td>
                     </tr>
                   ))}
-                  {issuedCards.length === 0 && (
+                  {filteredIssuedCards.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="p-8 text-center text-slate-400 font-medium">Aucune carte active attribuée aux clients.</td>
+                      <td colSpan={7} className="p-8 text-center text-slate-400 font-medium">Aucune carte trouvée.</td>
                     </tr>
                   )}
                 </tbody>

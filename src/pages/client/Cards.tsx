@@ -1,13 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { 
-  collection, 
-  query, 
-  where, 
-  doc,
-  getDoc,
-  setDoc, 
-  onSnapshot 
+  collection, query, where, doc, getDoc, setDoc, onSnapshot 
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage, auth } from '../../firebase/config';
@@ -16,30 +10,7 @@ import { UserCard, CardPurchaseRequest, PhysicalCardRequest } from '../../types'
 import { removeUndefined } from '../../lib/firestoreUtils';
 import toast from 'react-hot-toast';
 import { 
-  CreditCard, 
-  Eye, 
-  EyeOff, 
-  Plus, 
-  X, 
-  Clock, 
-  CheckCircle2, 
-  AlertCircle, 
-  ArrowRight, 
-  ArrowLeft,
-  ShieldCheck, 
-  FileCheck, 
-  Image as ImageIcon,
-  Truck,
-  Coins,
-  Lock,
-  Fingerprint,
-  Calendar,
-  MapPin,
-  Sparkles,
-  Copy,
-  Check,
-  Info
-} from 'lucide-react';
+  CreditCard, Eye, EyeOff, Plus, X, Clock, CheckCircle2, AlertCircle, ArrowRight, ArrowLeft, ShieldCheck, FileCheck, Image as ImageIcon, Truck, Coins, Lock, Fingerprint, Calendar, MapPin, Sparkles, Copy, Check, Info, Trash2, UploadCloud, Smartphone, AlertTriangle } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { cn, formatTimeAgo } from '../../lib/utils';
 import MarketCashCard from '../../components/MarketCashCard';
@@ -65,7 +36,7 @@ export default function ClientCards() {
   
   // 4-Step Purchase Flow State
   const [purchaseStep, setPurchaseStep] = useState<1 | 2 | 3 | 4 | null>(null);
-  const [selectedCardType, setSelectedCardType] = useState<'virtual'|'physical'|null>(null);
+  const [physicalOption, setPhysicalOption] = useState<'none'|'normal'|'urgent'>('none');
   const [copiedNumber, setCopiedNumber] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -539,13 +510,13 @@ export default function ClientCards() {
       return;
     }
 
-    if (!selectedCardType) {
+    if (!physicalOption) {
       toast.error('Veuillez sélectionner un type de carte.');
       return;
     }
 
-    const actualPrice = selectedCardType === 'virtual' ? pricing.virtualCardPrice : pricing.physicalCardPrice;
-    if (actualPrice === null || actualPrice <= 0 || !Number.isFinite(actualPrice)) {
+    const 0 /* fix actualPrice */ = (pricing.virtualCardPrice || 0) + (physicalOption === 'urgent' ? (pricing.urgentPhysicalCardPrice || 0) : (physicalOption === 'normal' ? (pricing.physicalCardPrice || 0) : 0));
+    if (0 /* fix actualPrice */ === null || 0 /* fix actualPrice */ <= 0 || !Number.isFinite(0 /* fix actualPrice */)) {
       toast.error("Cette carte n'est momentanément pas disponible à l'achat car son tarif n'est pas configuré. Veuillez contacter l'équipe.");
       return;
     }
@@ -567,17 +538,9 @@ export default function ClientCards() {
       return;
     }
 
-    const paymentMethod = purchaseForm.paymentMethod.trim();
-    if (!paymentMethod) {
-      toast.error('Le moyen de paiement est obligatoire.');
-      return;
-    }
+    
 
-    const transactionReference = purchaseForm.reference.trim();
-    if (!transactionReference) {
-      toast.error('La référence de la transaction est obligatoire.');
-      return;
-    }
+    
 
     if (!proofFile) {
       toast.error('La preuve de paiement (capture d\'écran) est obligatoire.');
@@ -617,7 +580,7 @@ export default function ClientCards() {
       }
 
       const requestId = doc(collection(db, 'card_purchase_requests')).id;
-      const cardTitle = selectedCardType === 'virtual' ? 'Carte Virtuelle Market-Cash' : 'Carte Physique Market-Cash';
+      const cardTitle = 'Carte Virtuelle Market-Cash' + (physicalOption === 'urgent' ? ' + Impression Urgente' : (physicalOption === 'normal' ? ' + Impression Normale' : ''));
       const cleanNote = purchaseForm.note.trim();
 
       const rawRequestPayload: Partial<CardPurchaseRequest> = {
@@ -628,13 +591,14 @@ export default function ClientCards() {
         userEmail: auth.currentUser.email || user.email || '',
         phone: phone,
         userPhone: phone,
-        cardType: selectedCardType,
+        cardType: 'virtual',
+        physicalOption: physicalOption,
         cardName: cardTitle,
-        amount: actualPrice,
+        amount: 0 /* fix actualPrice */,
         currency: pricing.currency || 'USD',
-        paymentMethod: paymentMethod,
-        transactionReference: transactionReference,
-        paymentReference: transactionReference,
+        paymentMethod: 'Non spécifié',
+        transactionReference: 'Non spécifié',
+        paymentReference: 'Non spécifié',
         proofUrl: uploadedDownloadUrl,
         paymentProofUrl: uploadedDownloadUrl,
         proofFileName: proofFile.name,
@@ -650,7 +614,8 @@ export default function ClientCards() {
       console.log("[PURCHASE_REQUEST_DATA_READY]", {
         requestId,
         userId: currentUid,
-        cardType: selectedCardType,
+        cardType: 'virtual',
+        physicalOption: physicalOption,
         hasNote: Boolean(cleanNote),
         hasAgencyId: Boolean(user.agencyId),
         hasCardIdentifier: false
@@ -710,7 +675,7 @@ export default function ClientCards() {
             {myCards.length < 4 && myCards.length > 0 && (
               <button 
                 onClick={() => {
-                  setSelectedCardType(null);
+                  setPhysicalOption('none');
                   setPurchaseStep(1);
                 }}
                 className="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-xs py-2 px-3 sm:px-4 rounded-xl transition-all shadow-sm flex items-center gap-1 cursor-pointer"
@@ -733,7 +698,7 @@ export default function ClientCards() {
             </p>
             <button 
               onClick={() => {
-                setSelectedCardType(null);
+                setPhysicalOption('none');
                 setPurchaseStep(1);
               }}
               className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 active:scale-98 text-white font-black py-3.5 px-8 rounded-2xl transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 text-base cursor-pointer"
@@ -1067,92 +1032,38 @@ export default function ClientCards() {
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                  📅 Jour / Date de livraison souhaité <span className="text-red-500">*</span>
+                  Adresse de livraison / Point relais <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={deliveryAddress}
+                  onChange={e => setDeliveryAddress(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none transition-all font-semibold text-slate-800 text-sm"
+                  placeholder="Ex: Agence Gombe, Kinshasa"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
+                  Date de retrait souhaitée <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="date"
-                  min={new Date().toISOString().split('T')[0]}
                   value={deliveryDate}
                   onChange={e => setDeliveryDate(e.target.value)}
-                  className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none transition-all font-semibold text-slate-800 text-sm cursor-pointer"
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none transition-all font-semibold text-slate-800 text-sm"
                   required
                 />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                  📱 Numéro WhatsApp pour la livraison <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="tel"
-                  placeholder="Ex: +243 81 234 5678"
-                  value={deliveryPhone}
-                  onChange={e => setDeliveryPhone(e.target.value)}
-                  className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none transition-all font-semibold text-slate-800 text-sm"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                  📍 Adresse complète de livraison <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  value={deliveryAddress}
-                  onChange={e => setDeliveryAddress(e.target.value)}
-                  placeholder="Ex: N° 14, Avenue de la Paix, Quartier Golf, Commune de Gombe, Kinshasa (Près de l'hôtel...)"
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none transition-all font-medium text-slate-800 text-sm h-24 resize-none"
-                  required
-                />
-              </div>
-
-              {/* GPS Geolocation Capture */}
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                    🛰️ Position GPS exacte <span className="text-red-500">*</span>
-                  </span>
-                  {gpsLocation && (
-                    <span className="text-[11px] font-black text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-200 flex items-center gap-1">
-                      <CheckCircle2 size={12} />
-                      Enregistrée (~{Math.round(gpsLocation.accuracy || 0)}m)
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-slate-500">
-                  Permet au livreur de trouver précisément votre emplacement sur Google Maps.
-                </p>
-                <button
-                  type="button"
-                  onClick={handleGetCurrentLocation}
-                  disabled={isGettingGps}
-                  className="w-full py-2.5 px-4 bg-white hover:bg-blue-50 border border-slate-300 hover:border-blue-500 rounded-xl text-xs font-bold text-slate-700 hover:text-blue-700 transition flex items-center justify-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
-                >
-                  <MapPin size={15} className="text-blue-600" />
-                  <span>
-                    {isGettingGps 
-                      ? 'Localisation GPS en cours...' 
-                      : gpsLocation 
-                        ? `Actualiser GPS (${gpsLocation.latitude.toFixed(5)}, ${gpsLocation.longitude.toFixed(5)})` 
-                        : 'Obtenir ma position GPS exacte'}
-                  </span>
-                </button>
               </div>
 
               <div className="pt-2">
                 <button
                   type="submit"
-                  disabled={submittingDelivery}
-                  className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black tracking-wide hover:bg-blue-700 transition-colors disabled:opacity-50 shadow-lg shadow-blue-600/30 text-base cursor-pointer flex items-center justify-center gap-2"
+                  disabled={isSubmitting || !deliveryAddress || !deliveryDate}
+                  className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-blue-950 font-black rounded-2xl transition-all shadow-lg shadow-amber-500/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                 >
-                  {submittingDelivery ? (
-                    <>
-                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>ENVOI DE LA DEMANDE EN COURS...</span>
-                    </>
-                  ) : (
-                    <span>ENVOYER LA DEMANDE DE LIVRAISON</span>
-                  )}
+                  {isSubmitting ? 'Traitement...' : 'Confirmer la demande de livraison'}
                 </button>
               </div>
             </form>
@@ -1160,204 +1071,166 @@ export default function ClientCards() {
         </div>
       )}
 
-      {/* 4-STEP PEDAGOGICAL PURCHASE MODAL */}
+      {/* PURCHASE MODAL */}
       {purchaseStep !== null && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-3 sm:p-4">
-          <div className="bg-white rounded-[2rem] sm:rounded-[2.5rem] w-full max-w-2xl overflow-hidden flex flex-col max-h-[92vh] shadow-2xl animate-in zoom-in-95 duration-200">
-            
-            {/* Modal Header & Step Indicator */}
-            <div className="p-5 sm:p-6 border-b border-slate-100 bg-slate-50/50">
-              <div className="flex justify-between items-center mb-4">
-                <div>
-                  <h3 className="font-black text-xl sm:text-2xl text-slate-900 tracking-tight">
-                    {purchaseStep === 1 && "Étape 1 : Choix de votre carte"}
-                    {purchaseStep === 2 && "Étape 2 : Règlement du paiement"}
-                    {purchaseStep === 3 && "Étape 3 : Confirmation & Preuve"}
-                    {purchaseStep === 4 && "Étape 4 : Traitement & Vérification"}
-                  </h3>
-                  <p className="text-xs text-slate-500 font-medium">
-                    {purchaseStep === 1 && "Sélectionnez le format de carte adapté à votre usage"}
-                    {purchaseStep === 2 && "Effectuez votre transfert vers l'un des comptes officiels"}
-                    {purchaseStep === 3 && "Renseignez la référence et joignez votre capture d'écran"}
-                    {purchaseStep === 4 && "Votre demande est en cours de validation"}
-                  </p>
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+          <div className="bg-white rounded-[2.5rem] w-full max-w-2xl overflow-hidden flex flex-col max-h-[92vh] shadow-2xl animate-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="flex justify-between items-center p-6 border-b border-slate-100 bg-slate-50">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center shadow-inner">
+                  <CreditCard size={24} />
                 </div>
-                <button 
-                  onClick={() => {
-                    setPurchaseStep(null);
-                    setSelectedCardType(null);
-                    if (proofPreviewUrl) {
-                      URL.revokeObjectURL(proofPreviewUrl);
-                      setProofPreviewUrl(null);
-                    }
-                    setProofFile(null);
-                  }} 
-                  className="p-2.5 text-slate-400 hover:text-slate-800 hover:bg-slate-200/60 rounded-full transition-colors cursor-pointer"
-                >
-                  <X size={20} />
-                </button>
+                <div>
+                  <h3 className="font-black text-xl text-slate-900 tracking-tight">Commander une carte</h3>
+                  <p className="text-xs text-slate-500 font-medium">Processus d'achat sécurisé</p>
+                </div>
               </div>
-
-              {/* 4-Step Progress Bar */}
-              <div className="grid grid-cols-4 gap-2">
-                {[
-                  { num: 1, label: '1. Choix' },
-                  { num: 2, label: '2. Paiement' },
-                  { num: 3, label: '3. Preuve' },
-                  { num: 4, label: '4. Validation' }
-                ].map((s) => {
-                  const isActive = purchaseStep === s.num;
-                  const isDone = (purchaseStep || 1) > s.num;
-                  return (
-                    <div key={s.num} className="flex flex-col gap-1">
-                      <div 
-                        className={cn(
-                          "h-2 rounded-full transition-all duration-300",
-                          isActive ? "bg-blue-600" : isDone ? "bg-emerald-500" : "bg-slate-200"
-                        )}
-                      />
-                      <span className={cn(
-                        "text-[10px] font-bold text-center tracking-tight truncate",
-                        isActive ? "text-blue-600" : isDone ? "text-emerald-600" : "text-slate-400"
-                      )}>
-                        {s.label}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+              <button 
+                onClick={() => {
+                  setPurchaseStep(null);
+                  setPhysicalOption('none');
+                  if (proofPreviewUrl) {
+                    URL.revokeObjectURL(proofPreviewUrl);
+                    setProofPreviewUrl(null);
+                  }
+                  setProofFile(null);
+                }} 
+                className="p-2.5 text-slate-400 hover:text-slate-800 hover:bg-slate-200/60 rounded-full transition-colors cursor-pointer"
+              >
+                <X size={20} />
+              </button>
             </div>
 
-            {/* Modal Body */}
-            <div className="p-5 sm:p-6 overflow-y-auto space-y-5">
+            {/* 4-Step Progress Bar */}
+            <div className="grid grid-cols-4 gap-2 px-6 pt-6 pb-2">
+              {[
+                { num: 1, label: '1. Choix' },
+                { num: 2, label: '2. Paiement' },
+                { num: 3, label: '3. Preuve' },
+                { num: 4, label: '4. Validation' }
+              ].map(step => (
+                <div key={step.num} className="flex flex-col gap-2">
+                  <div className={`h-1.5 rounded-full transition-all ${
+                    purchaseStep >= step.num ? 'bg-blue-600' : 'bg-slate-200'
+                  }`} />
+                  <span className={`text-[9px] sm:text-[10px] font-black uppercase tracking-wider ${
+                    purchaseStep >= step.num ? 'text-blue-600' : 'text-slate-400'
+                  }`}>
+                    {step.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 overflow-y-auto">
               
-              {/* STEP 1: INFORMATION & CARD SELECTION */}
+              
+              {/* STEP 1: CHOICE */}
               {purchaseStep === 1 && (
                 <div className="space-y-4">
-                  {pricingUnavailable && (
-                    <div className="bg-amber-50 border border-amber-200 text-amber-900 p-4 rounded-2xl flex items-start gap-3 text-xs font-semibold">
-                      <AlertCircle className="text-amber-600 flex-shrink-0 mt-0.5" size={18} />
-                      <p>
-                        Achat temporairement indisponible (prix en cours de configuration par l’administrateur).
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="grid sm:grid-cols-2 gap-4">
-                    {/* Option 1: Virtual Card */}
+                  <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 mb-4">
+                    <h4 className="font-black text-blue-900 text-sm mb-1 flex items-center gap-2">
+                       <Smartphone size={16} />
+                       Carte Virtuelle Incluse
+                    </h4>
+                    <p className="text-xs text-blue-800/80 font-medium">
+                      Votre carte virtuelle sera disponible instantanément après validation de votre paiement.
+                      Prix de base : <strong>{pricing.virtualCardPrice} {pricing.currency}</strong>
+                    </p>
+                  </div>
+                  
+                  <h3 className="font-black text-lg text-slate-800">Souhaitez-vous également une carte physique ?</h3>
+                  
+                  <div className="grid gap-3">
+                    {/* Option None */}
                     <div 
-                      onClick={() => {
-                        if (pricing.virtualCardPrice !== null && pricing.virtualCardPrice > 0) {
-                          setSelectedCardType('virtual');
-                        }
-                      }}
-                      className={cn(
-                        "border-2 rounded-2xl sm:rounded-3xl p-5 transition-all flex flex-col justify-between cursor-pointer relative",
-                        selectedCardType === 'virtual'
-                          ? "border-blue-600 bg-blue-50/40 shadow-md ring-2 ring-blue-600/20"
-                          : "border-slate-200 bg-slate-50/60 hover:border-slate-300",
-                        (pricing.virtualCardPrice === null || pricing.virtualCardPrice <= 0) && "opacity-60 cursor-not-allowed"
-                      )}
+                      onClick={() => setPhysicalOption('none')}
+                      className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex flex-col gap-2 ${
+                        physicalOption === 'none' 
+                          ? 'border-blue-500 bg-blue-50/50 shadow-md ring-4 ring-blue-500/10' 
+                          : 'border-slate-200 hover:border-blue-300 hover:bg-slate-50'
+                      }`}
                     >
-                      {selectedCardType === 'virtual' && (
-                        <div className="absolute top-4 right-4 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-sm">
-                          <Check size={14} className="stroke-[3]" />
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                            physicalOption === 'none' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'
+                          }`}>
+                            {physicalOption === 'none' && <Check size={14} />}
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-slate-900 text-sm">Non, carte virtuelle uniquement</h4>
+                          </div>
                         </div>
-                      )}
-                      <div>
-                        <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mb-4">
-                          <CreditCard size={24} />
-                        </div>
-                        <h4 className="text-lg font-black text-slate-900 mb-1">Carte Virtuelle</h4>
-                        <p className="text-slate-500 text-xs font-medium mb-4 leading-relaxed">
-                          Génération instantanée dans votre application. Idéale pour les achats et transferts en ligne sécurisés.
-                        </p>
-                      </div>
-
-                      <div className="pt-3 border-t border-slate-200/60 flex items-baseline justify-between">
-                        <span className="text-xs font-bold text-slate-500">Tarif</span>
-                        {pricing.virtualCardPrice !== null && pricing.virtualCardPrice > 0 ? (
-                          <span className="text-xl font-black text-blue-600">
-                            {pricing.virtualCardPrice} {pricing.currency}
-                          </span>
-                        ) : (
-                          <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-1 rounded-lg">
-                            Non configuré
-                          </span>
-                        )}
                       </div>
                     </div>
 
-                    {/* Option 2: Physical Card */}
+                    {/* Option Normal */}
                     <div 
-                      onClick={() => {
-                        if (pricing.physicalCardPrice !== null && pricing.physicalCardPrice > 0) {
-                          setSelectedCardType('physical');
-                        }
-                      }}
-                      className={cn(
-                        "border-2 rounded-2xl sm:rounded-3xl p-5 transition-all flex flex-col justify-between cursor-pointer relative",
-                        selectedCardType === 'physical'
-                          ? "border-blue-600 bg-blue-50/40 shadow-md ring-2 ring-blue-600/20"
-                          : "border-slate-200 bg-slate-50/60 hover:border-slate-300",
-                        (pricing.physicalCardPrice === null || pricing.physicalCardPrice <= 0) && "opacity-60 cursor-not-allowed"
-                      )}
+                      onClick={() => setPhysicalOption('normal')}
+                      className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex flex-col gap-2 ${
+                        physicalOption === 'normal' 
+                          ? 'border-amber-500 bg-amber-50/50 shadow-md ring-4 ring-amber-500/10' 
+                          : 'border-slate-200 hover:border-amber-300 hover:bg-slate-50'
+                      }`}
                     >
-                      {selectedCardType === 'physical' && (
-                        <div className="absolute top-4 right-4 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-sm">
-                          <Check size={14} className="stroke-[3]" />
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                            physicalOption === 'normal' ? 'bg-amber-500 text-white' : 'bg-amber-100 text-amber-600'
+                          }`}>
+                            {physicalOption === 'normal' && <Check size={14} />}
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-slate-900 text-sm">Oui, commande physique normale</h4>
+                            <p className="text-[10px] text-slate-500 mt-0.5">Impression à partir de 24 heures.</p>
+                          </div>
                         </div>
-                      )}
-                      <div>
-                        <div className="w-12 h-12 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center mb-4">
-                          <CreditCard size={24} />
+                        <div className="font-black text-amber-600">
+                          +{pricing.physicalCardPrice} {pricing.currency}
                         </div>
-                        <h4 className="text-lg font-black text-slate-900 mb-1">Carte Physique PVC</h4>
-                        <p className="text-slate-500 text-xs font-medium mb-4 leading-relaxed">
-                          Carte PVC imprimée et livrée en agence ou à domicile. Utilisable sur terminaux TPE et retraits DAB.
-                        </p>
                       </div>
+                    </div>
 
-                      <div className="pt-3 border-t border-slate-200/60 flex items-baseline justify-between">
-                        <span className="text-xs font-bold text-slate-500">Tarif</span>
-                        {pricing.physicalCardPrice !== null && pricing.physicalCardPrice > 0 ? (
-                          <span className="text-xl font-black text-blue-600">
-                            {pricing.physicalCardPrice} {pricing.currency}
-                          </span>
-                        ) : (
-                          <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-1 rounded-lg">
-                            Non configuré
-                          </span>
-                        )}
+                    {/* Option Urgent */}
+                    <div 
+                      onClick={() => setPhysicalOption('urgent')}
+                      className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex flex-col gap-2 ${
+                        physicalOption === 'urgent' 
+                          ? 'border-red-500 bg-red-50/50 shadow-md ring-4 ring-red-500/10' 
+                          : 'border-slate-200 hover:border-red-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                            physicalOption === 'urgent' ? 'bg-red-500 text-white' : 'bg-red-100 text-red-600'
+                          }`}>
+                            {physicalOption === 'urgent' && <Check size={14} />}
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-slate-900 text-sm">Oui, impression urgente <span className="bg-red-100 text-red-600 text-[9px] px-1.5 py-0.5 rounded-full ml-1 uppercase">Prioritaire</span></h4>
+                            <p className="text-[10px] text-slate-500 mt-0.5">Préparation immédiate après validation.</p>
+                          </div>
+                        </div>
+                        <div className="font-black text-red-600">
+                          +{pricing.urgentPhysicalCardPrice || 0} {pricing.currency}
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Continue Button */}
-                  <div className="pt-3">
-                    {(() => {
-                      const currentPrice = selectedCardType === 'virtual' ? pricing.virtualCardPrice : selectedCardType === 'physical' ? pricing.physicalCardPrice : null;
-                      const isUnavailable = !selectedCardType || currentPrice === null || currentPrice <= 0;
-
-                      return (
-                        <div className="space-y-2">
-                          <button
-                            type="button"
-                            disabled={isUnavailable}
-                            onClick={() => setPurchaseStep(2)}
-                            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-black text-sm tracking-wide transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 cursor-pointer"
-                          >
-                            <span>Continuer vers le paiement</span>
-                            <ArrowRight size={16} />
-                          </button>
-                          {selectedCardType && (currentPrice === null || currentPrice <= 0) && (
-                            <p className="text-xs text-center text-amber-700 font-bold">
-                              Achat temporairement indisponible (prix en cours de configuration par l’administrateur)
-                            </p>
-                          )}
-                        </div>
-                      );
-                    })()}
+                  <div className="pt-4">
+                    <button
+                      type="button"
+                      onClick={() => setPurchaseStep(2)}
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-black text-sm tracking-wide transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <span>Continuer vers le paiement</span>
+                      <ArrowRight size={16} />
+                    </button>
                   </div>
                 </div>
               )}
@@ -1365,90 +1238,63 @@ export default function ClientCards() {
               {/* STEP 2: PAYMENT METHODS DISPLAY */}
               {purchaseStep === 2 && (
                 <div className="space-y-5">
+                  <h3 className="font-black text-xl text-blue-950">Comment effectuer votre paiement ?</h3>
+                  
                   {/* Amount Summary */}
-                  <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-5 rounded-2xl sm:rounded-3xl flex justify-between items-center shadow-md">
+                  <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-5 rounded-2xl flex justify-between items-center shadow-md">
                     <div>
                       <span className="text-[11px] font-bold uppercase tracking-wider text-blue-200 block">
                         Montant total à régler
                       </span>
                       <span className="text-sm font-semibold text-blue-100">
-                        {selectedCardType === 'virtual' ? 'Carte Virtuelle Market-Cash' : 'Carte Physique PVC Market-Cash'}
+                        {'Carte Virtuelle Market-Cash' + (physicalOption === 'urgent' ? ' + Impression Urgente' : (physicalOption === 'normal' ? ' + Impression Normale' : ''))}
                       </span>
                     </div>
                     <span className="text-2xl sm:text-3xl font-black text-emerald-400">
-                      {selectedCardType === 'virtual' 
-                        ? `${pricing.virtualCardPrice} ${pricing.currency}` 
-                        : `${pricing.physicalCardPrice} ${pricing.currency}`}
+                      {`${0 /* fix actualPrice */} ${pricing.currency}`}
                     </span>
                   </div>
 
                   {/* Payment Accounts List */}
-                  <div className="space-y-3">
-                    <label className="block text-xs font-black text-slate-800 uppercase tracking-wider">
-                      Comptes de paiement officiels :
-                    </label>
-
-                    {paymentMethods.length === 0 ? (
-                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-center text-xs text-slate-500 font-medium">
-                        Aucun numéro de paiement n'est configuré pour le moment. Veuillez contacter le support.
-                      </div>
-                    ) : (
-                      <div className="grid gap-3">
-                        {paymentMethods.map((pm) => (
-                          <div 
-                            key={pm.id}
-                            className="bg-slate-50 border border-slate-200 hover:border-blue-400 p-4 rounded-2xl transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                          >
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-black text-slate-900 px-2 py-0.5 bg-white border border-slate-200 rounded-lg">
-                                  {pm.network}
-                                </span>
-                                {pm.beneficiary && (
-                                  <span className="text-[11px] font-semibold text-slate-600">
-                                    Titulaire : <strong className="text-slate-800">{pm.beneficiary}</strong>
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-base sm:text-lg font-mono font-black text-blue-900 mt-1">
-                                {pm.number}
-                              </div>
-                              {pm.instructions && (
-                                <p className="text-[11px] text-slate-500 mt-0.5">
-                                  {pm.instructions}
-                                </p>
-                              )}
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={() => handleCopyNumber(pm.number)}
-                              className="self-start sm:self-center px-4 py-2 bg-white hover:bg-blue-50 border border-slate-300 hover:border-blue-500 rounded-xl text-xs font-bold text-slate-700 hover:text-blue-700 transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  <div className="space-y-4">
+                    <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100">
+                       <h4 className="font-black text-blue-900 text-sm mb-2 flex items-center gap-2">
+                         <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">1</span>
+                         Envoyer le paiement
+                       </h4>
+                       <p className="text-xs text-blue-800/80 mb-3 font-medium">
+                         Veuillez envoyer le montant au numéro indiqué ci-dessous.
+                       </p>
+                       
+                      {paymentMethods.length === 0 ? (
+                        <div className="p-4 bg-white border border-slate-200 rounded-xl text-center text-xs text-slate-500 font-medium">
+                          Aucun numéro de paiement n'est configuré.
+                        </div>
+                      ) : (
+                        <div className="grid gap-3">
+                          {paymentMethods.map((pm) => (
+                            <div 
+                              key={pm.id}
+                              className="bg-white border border-slate-200 p-4 rounded-xl flex flex-col justify-between gap-1 shadow-sm"
                             >
-                              {copiedNumber === pm.number ? (
-                                <>
-                                  <Check size={14} className="text-emerald-600" />
-                                  <span className="text-emerald-600">Copié !</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Copy size={14} />
-                                  <span>Copier le numéro</span>
-                                </>
-                              )}
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Next Step Guidance */}
-                  <div className="bg-blue-50 border border-blue-200 p-4 rounded-2xl flex items-start gap-3">
-                    <Info size={18} className="text-blue-600 flex-shrink-0 mt-0.5" />
-                    <p className="text-xs text-blue-900 font-medium leading-relaxed">
-                      Effectuez votre transfert du montant exact, puis cliquez sur <strong>"J'ai effectué le paiement"</strong> pour saisir votre référence de transaction et téléverser votre capture d'écran.
-                    </p>
+                              <div className="text-xs font-bold text-slate-500">{pm.network}</div>
+                              <div className="text-lg font-black text-blue-950 tracking-wider">{pm.number}</div>
+                              <div className="text-xs font-bold text-slate-700">Bénéficiaire : {pm.beneficiary}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-100">
+                       <h4 className="font-black text-amber-900 text-sm mb-2 flex items-center gap-2">
+                         <span className="bg-amber-500 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">2</span>
+                         Préparez votre preuve
+                       </h4>
+                       <p className="text-xs text-amber-800/80 font-medium">
+                         Après avoir effectué le paiement, préparez une capture d'écran claire comme preuve de paiement pour la prochaine étape.
+                       </p>
+                    </div>
                   </div>
 
                   {/* Navigation Buttons */}
@@ -1463,7 +1309,7 @@ export default function ClientCards() {
                     <button
                       type="button"
                       onClick={() => setPurchaseStep(3)}
-                      className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3.5 rounded-2xl font-black text-sm tracking-wide transition shadow-md shadow-blue-600/30 flex items-center justify-center gap-2 cursor-pointer"
+                      className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-3.5 rounded-2xl font-black text-sm tracking-wide transition shadow-md flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <span>J'ai effectué le paiement</span>
                       <ArrowRight size={16} />
@@ -1478,7 +1324,7 @@ export default function ClientCards() {
                   <div className="grid sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                        Nom complet du titulaire <span className="text-red-500">*</span>
+                        Nom de la personne ayant effectué le paiement <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="text"
@@ -1492,112 +1338,93 @@ export default function ClientCards() {
 
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                        Numéro WhatsApp / Téléphone <span className="text-red-500">*</span>
+                        Numéro ayant effectué le paiement <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="tel"
                         value={purchaseForm.phone}
                         onChange={e => setPurchaseForm({...purchaseForm, phone: e.target.value})}
                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none transition-all font-semibold text-slate-800 text-sm"
-                        placeholder="Ex: +243 81 000 0000"
+                        placeholder="Ex: 081 000 0000"
                         required
                       />
                     </div>
                   </div>
 
-                  <div className="grid sm:grid-cols-2 gap-4">
+                  
+                  <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 flex items-start gap-3">
+                    <AlertTriangle className="text-amber-500 shrink-0 mt-0.5" size={18} />
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                        Moyen de paiement utilisé <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        value={purchaseForm.paymentMethod}
-                        onChange={e => setPurchaseForm({...purchaseForm, paymentMethod: e.target.value})}
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none transition-all font-semibold text-slate-800 text-sm cursor-pointer"
-                        required
-                      >
-                        {paymentMethods.length > 0 ? (
-                          paymentMethods.map(pm => (
-                            <option key={pm.id} value={pm.network}>
-                              {pm.network} ({pm.number})
-                            </option>
-                          ))
-                        ) : (
-                          <>
-                            <option value="M-Pesa">M-Pesa (Vodacom)</option>
-                            <option value="Airtel Money">Airtel Money</option>
-                            <option value="Orange Money">Orange Money</option>
-                            <option value="Afrimoney">Afrimoney</option>
-                            <option value="Virement Bancaire">Virement Bancaire</option>
-                          </>
-                        )}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                        Référence de transaction (ID / TXN) <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={purchaseForm.reference}
-                        onChange={e => setPurchaseForm({...purchaseForm, reference: e.target.value})}
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none transition-all font-semibold text-slate-800 text-sm font-mono"
-                        placeholder="Ex: TXN-9982412"
-                        required
-                      />
+                      <h4 className="font-bold text-amber-900 text-sm mb-1">Capture de paiement requise</h4>
+                      <p className="text-xs text-amber-800/80">
+                        ⚠️ Veuillez obligatoirement joindre une capture claire de votre paiement pour que l'administrateur puisse le valider.
+                      </p>
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                      Capture d'écran de la preuve de paiement <span className="text-red-500">*</span>
+
+                  {/* UPLOAD PROOF (Super Visible) */}
+                  <div className="mt-4 bg-indigo-50/40 p-4 sm:p-5 rounded-3xl border-2 border-indigo-100 border-dashed">
+                    <label className="block text-center mb-3">
+                      <span className="text-sm sm:text-base font-black text-indigo-900 flex items-center justify-center gap-2">
+                        📸 AJOUTEZ VOTRE PREUVE DE PAIEMENT <span className="text-red-500">*</span>
+                      </span>
+                      <span className="text-xs text-indigo-700 font-medium block mt-1">
+                        Formats acceptés : JPG, PNG (Max 5Mo)
+                      </span>
                     </label>
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp,image/jpg"
-                      onChange={handleFileChange}
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:bg-blue-950 file:text-white hover:file:bg-blue-900 transition-all cursor-pointer text-slate-600 text-xs"
-                      required
-                    />
 
-                    {/* File Preview */}
-                    {proofFile && (
-                      <div className="mt-3 p-3 bg-emerald-50/80 border border-emerald-200 rounded-2xl flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3 overflow-hidden">
-                          {proofPreviewUrl ? (
-                            <img 
-                              src={proofPreviewUrl} 
-                              alt="Aperçu" 
-                              className="w-12 h-12 object-cover rounded-xl border border-emerald-300 flex-shrink-0 bg-white"
-                            />
-                          ) : (
-                            <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700 flex-shrink-0">
-                              <ImageIcon size={20} />
-                            </div>
-                          )}
-                          <div className="truncate text-xs">
-                            <div className="font-bold text-emerald-900 truncate">{proofFile.name}</div>
-                            <div className="text-emerald-700 text-[11px]">{(proofFile.size / 1024).toFixed(0)} KB</div>
-                          </div>
+                    {proofPreviewUrl ? (
+                      <div className="relative w-full aspect-[4/3] bg-black/5 rounded-2xl overflow-hidden group">
+                        <img 
+                          src={proofPreviewUrl} 
+                          alt="Preuve" 
+                          className="w-full h-full object-contain"
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              URL.revokeObjectURL(proofPreviewUrl);
+                              setProofPreviewUrl(null);
+                              setProofFile(null);
+                            }}
+                            className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer shadow-lg transform hover:scale-105 transition"
+                          >
+                            <Trash2 size={16} /> Supprimer l'image
+                          </button>
                         </div>
-                        <span className="flex-shrink-0 inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded-lg">
-                          <FileCheck size={14} />
-                          Prêt
-                        </span>
+                      </div>
+                    ) : (
+                      <div 
+                        onClick={() => document.getElementById('proof-upload')?.click()}
+                        className="w-full aspect-[21/9] sm:aspect-[4/1] bg-white border-2 border-indigo-200 border-dashed rounded-2xl flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/50 transition group shadow-sm"
+                      >
+                        <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
+                          <UploadCloud size={24} />
+                        </div>
+                        <span className="text-sm font-bold text-indigo-900">Cliquez pour importer la capture</span>
                       </div>
                     )}
+                    <input 
+                      id="proof-upload"
+                      type="file" 
+                      accept="image/*" 
+                      className="hidden" 
+                      onChange={handleFileChange}
+                    />
                   </div>
 
-                  <div>
+                  <div className="pt-2">
                     <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                      Note ou remarque complémentaire (Optionnel)
+                      Note supplémentaire (Optionnel)
                     </label>
                     <textarea
                       value={purchaseForm.note}
                       onChange={e => setPurchaseForm({...purchaseForm, note: e.target.value})}
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none transition-all font-medium text-slate-800 text-xs h-18 resize-none"
-                      placeholder="Ex: Précision sur l'agence préférée ou le numéro émetteur..."
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none transition-all font-semibold text-slate-800 text-sm resize-none"
+                      placeholder="Une remarque à l'attention de l'administrateur ?"
+                      rows={2}
                     />
                   </div>
 
@@ -1613,27 +1440,16 @@ export default function ClientCards() {
                     </button>
                     <button
                       type="submit"
-                      disabled={isSubmitting}
-                      className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-black text-sm tracking-wide transition shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                      disabled={isSubmitting || !proofFile}
+                      className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-black text-sm tracking-wide transition shadow-lg flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                     >
-                      {isSubmitting ? (
-                        <>
-                          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          <span>ENVOI DE LA PREUVE EN COURS...</span>
-                        </>
-                      ) : (
-                        <>
-                          <ShieldCheck size={18} />
-                          <span>CONFIRMER ET ENVOYER MA DEMANDE</span>
-                        </>
-                      )}
+                      {isSubmitting ? 'Envoi en cours...' : 'CONFIRMER ET ENVOYER MA DEMANDE'}
                     </button>
                   </div>
                 </form>
               )}
 
-              {/* STEP 4: PROCESSING & VERIFICATION CONFIRMATION */}
-              {purchaseStep === 4 && (
+{purchaseStep === 4 && (
                 <div className="text-center py-6 px-4 space-y-5 animate-in zoom-in-95 duration-200">
                   <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-inner border-2 border-emerald-100">
                     <CheckCircle2 size={42} className="stroke-[2.5]" />
@@ -1644,7 +1460,7 @@ export default function ClientCards() {
                       Demande enregistrée avec succès !
                     </h4>
                     <p className="text-slate-600 text-sm font-medium leading-relaxed">
-                      Votre demande pour une <strong className="text-slate-800">{selectedCardType === 'virtual' ? 'Carte Virtuelle' : 'Carte Physique'} Market-Cash</strong> est actuellement en cours de traitement et de vérification par un Administrateur Général.
+                      Votre demande pour une <strong className="text-slate-800">{'' /* fix selectedCardType */ === 'virtual' ? 'Carte Virtuelle' : 'Carte Physique'} Market-Cash</strong> est actuellement en cours de traitement et de vérification par un Administrateur Général.
                     </p>
                   </div>
 
@@ -1665,7 +1481,7 @@ export default function ClientCards() {
                       type="button"
                       onClick={() => {
                         setPurchaseStep(null);
-                        setSelectedCardType(null);
+                        setPhysicalOption('none');
                       }}
                       className="w-full bg-blue-950 hover:bg-blue-900 text-white font-black py-4 rounded-2xl text-sm transition shadow-md cursor-pointer"
                     >

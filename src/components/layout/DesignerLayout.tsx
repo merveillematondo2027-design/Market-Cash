@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { Printer, Bell, User, Layers } from 'lucide-react';
+import { Printer, Bell, User, Layers, LayoutDashboard, Library, Truck } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 export default function DesignerLayout() {

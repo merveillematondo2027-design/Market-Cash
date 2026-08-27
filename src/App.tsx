@@ -33,13 +33,14 @@ import ClientProfile from './pages/client/Profile';
 // Admin Pages (Strictly admin_general)
 import AdminDashboard from './pages/admin/Dashboard';
 import AdminUsers from './pages/admin/Users';
-import AdminCards from './pages/admin/AdminCards';
+import AdminStock from './pages/admin/AdminStock';
 import AdminRequests from './pages/admin/Requests';
 import AdminDeliveries from './pages/admin/AdminDeliveries';
 import CardLibrary from './pages/admin/CardLibrary';
 import AdminHelp from './pages/admin/AdminHelp';
 import AdminNotifications from './pages/admin/Notifications';
 import AdminProfile from './pages/admin/AdminProfile';
+import AdminDesigner from './pages/admin/AdminDesigner';
 import AdminSettings from './pages/admin/Settings';
 
 // Agency Pages (Strictly chef_agence & admin_general)
@@ -182,7 +183,7 @@ export default function App() {
           <Route index element={<Navigate to="/admin/dashboard" replace />} />
           <Route path="dashboard" element={<AdminDashboard />} />
           <Route path="users" element={<AdminUsers />} />
-          <Route path="cards" element={<AdminCards />} />
+          <Route path="stock" element={<AdminStock />} />
           <Route path="library" element={<CardLibrary />} />
           <Route path="requests" element={<AdminRequests />} />
           <Route path="deliveries" element={<AdminDeliveries />} />
@@ -190,6 +191,7 @@ export default function App() {
           <Route path="help" element={<AdminHelp />} />
           <Route path="notifications" element={<AdminNotifications />} />
           <Route path="profile" element={<AdminProfile />} />
+          <Route path="designer" element={<AdminDesigner />} />
         </Route>
 
         {/* 3. CHEF D'AGENCE ROUTES (Strictly chef_agence & admin_general) */}

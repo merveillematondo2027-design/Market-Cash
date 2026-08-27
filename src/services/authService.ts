@@ -1,3 +1,4 @@
+import { logService } from './logService';
 import { auth, db, googleProvider } from '../firebase/config';
 import { 
   createUserWithEmailAndPassword, 
@@ -75,6 +76,7 @@ export const authService = {
     }
 
     const resolvePromise = (async () => {
+      logService.info('AUTH', 'USER_PROFILE_LOAD_START', 'Début du chargement du profil utilisateur', { userId: uid, userEmail: email });
       console.log('[USER_PROFILE_LOAD_START]', { uid, email });
 
       const userRef = doc(db, 'users', uid);
@@ -100,6 +102,7 @@ export const authService = {
           };
 
           await setDoc(userRef, removeUndefined(newUser));
+          logService.success('AUTH', 'USER_PROFILE_CREATED', 'Nouveau profil créé', { userId: newUser.uid, userEmail: newUser.email, userRole: newUser.role });
           console.log('[USER_PROFILE_CREATED]', { uid: newUser.uid, email: newUser.email, role: newUser.role });
           return newUser;
         }
@@ -114,9 +117,11 @@ export const authService = {
           await setDoc(userRef, { role: 'admin_general', updatedAt: Date.now() }, { merge: true });
         }
 
+        logService.success('AUTH', 'USER_PROFILE_FOUND', 'Profil utilisateur trouvé', { userId: data.uid, userEmail: data.email, userRole: data.role });
         console.log('[USER_PROFILE_FOUND]', { uid: data.uid, email: data.email, role: data.role });
         return data;
       } catch (error: any) {
+        logService.error('FIRESTORE', 'USER_PROFILE_CREATE_ERROR', error, { userId: uid, userEmail: email });
         console.error('[PROFILE_CREATE_ERROR]', error.code, error.message);
         throw error;
       } finally {
@@ -133,6 +138,7 @@ export const authService = {
    */
   async register(email: string, password: string, displayName: string, phone: string) {
     const cleanEmail = email.trim();
+    logService.info('AUTH', 'REGISTRATION_START', 'Tentative d\'inscription', { userEmail: cleanEmail });
     console.log('[REGISTRATION_START]', { email: cleanEmail });
 
     try {
@@ -167,10 +173,12 @@ export const authService = {
       };
 
       await setDoc(userRef, removeUndefined(newUser));
+      logService.success('AUTH', 'REGISTRATION_SUCCESS', 'Inscription réussie', { userId: uid, userEmail: cleanEmail, userRole: role });
       console.log('[REGISTRATION_SUCCESS]', { uid, email: cleanEmail, role });
 
       return { firebaseUser: result.user, user: newUser };
     } catch (error: any) {
+      logService.error('AUTH', 'REGISTRATION_ERROR', error, { userEmail: cleanEmail });
       console.error('[REGISTRATION_ERROR]', error.code, error.message);
       throw error;
     }
@@ -181,13 +189,16 @@ export const authService = {
    */
   async login(email: string, password: string) {
     const cleanEmail = email.trim();
+    logService.info('AUTH', 'AUTH_LOGIN_START', 'Tentative de connexion', { userEmail: cleanEmail });
     console.log('[AUTH_LOGIN_START]', { email: cleanEmail });
 
     try {
       const result = await signInWithEmailAndPassword(auth, cleanEmail, password);
+      logService.success('AUTH', 'AUTH_LOGIN_SUCCESS', 'Connexion réussie', { userId: result.user.uid, userEmail: result.user.email });
       console.log('[AUTH_LOGIN_SUCCESS]', { uid: result.user.uid, email: result.user.email });
       return { firebaseUser: result.user };
     } catch (error: any) {
+      logService.error('AUTH', 'AUTH_ERROR', error, { userEmail: cleanEmail });
       console.error('[AUTH_ERROR]', error.code, error.message);
       throw error;
     }
@@ -197,6 +208,7 @@ export const authService = {
    * Connexion Google avec prompt de sélection de compte obligatoire
    */
   async loginWithGoogle() {
+    logService.info('AUTH', 'AUTH_GOOGLE_START', 'Tentative de connexion Google');
     console.log('[AUTH_GOOGLE_START]');
     
     try {
@@ -206,6 +218,7 @@ export const authService = {
       });
 
       const result = await signInWithPopup(auth, googleProvider);
+      logService.success('AUTH', 'AUTH_GOOGLE_SUCCESS', 'Connexion Google réussie', { userId: result.user.uid, userEmail: result.user.email });
       console.log('[AUTH_GOOGLE_SUCCESS]', { 
         uid: result.user.uid, 
         email: result.user.email, 
@@ -216,6 +229,7 @@ export const authService = {
       const userDoc = await this.resolveUser(result.user);
       return { firebaseUser: result.user, user: userDoc };
     } catch (error: any) {
+      logService.error('AUTH', 'GOOGLE_AUTH_ERROR', error);
       console.error('[GOOGLE_AUTH_ERROR]', error.code, error.message);
       throw error;
     }

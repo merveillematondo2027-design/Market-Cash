@@ -19,7 +19,7 @@ export type CardStatus = 'available' | 'disabled' | 'active' | 'blocked';
 export type CardType = 'virtual' | 'physical';
 export type CardNetwork = 'visa' | 'mastercard' | 'amex' | 'other';
 
-export type CardSaleStatus = 'pending' | 'confirmed' | 'sold' | 'cancelled';
+export type CardSaleStatus = 'available' | 'reserved' | 'pending' | 'confirmed' | 'sold' | 'cancelled';
 export type CardPrintStatus = 'pending' | 'printed';
 export type DeliveryStatus = 'pending' | 'assigned' | 'in_progress' | 'out_for_delivery' | 'delivered' | 'reported' | 'cancelled';
 
@@ -52,6 +52,8 @@ export interface CardPurchaseRequest {
   clientPhone?: string;
   cardId?: string;
   cardType?: 'virtual' | 'physical';
+  isUrgent?: boolean; // CardPurchaseRequest
+  physicalOption?: 'none' | 'normal' | 'urgent';
   cardName?: string;
   amount: number;
   price?: number; // Compatibility
@@ -87,7 +89,8 @@ export interface PhysicalCardRequest {
   clientEmail?: string;
   clientPhone?: string;
   cardId: string;
-  cardIdentifier?: string; // MC-001-YYYYMMDD
+  cardIdentifier?: string;
+  isUrgent?: boolean; // MC-001-YYYYMMDD
   cardName?: string;
   cardNumberMasked?: string;
   cardHolder?: string;
@@ -126,7 +129,8 @@ export interface PhysicalCardRequest {
 export interface UserCard {
   id?: string;
   cardId: string; // unique ID of this assigned card
-  cardIdentifier?: string; // MC-001-YYYYMMDD format (ex: "MC-001-20260823")
+  cardIdentifier?: string;
+  isUrgent?: boolean; // MC-001-YYYYMMDD format (ex: "MC-001-20260823")
   catalogCardId?: string; // ID from CardCatalog
   userId: string;
   userEmail?: string;
@@ -141,7 +145,7 @@ export interface UserCard {
   rechargeNumber?: string; // Numéro de recharge renseigné par l'Admin
   network: CardNetwork;
   type: CardType;
-  status: 'active' | 'blocked';
+  status: 'active' | 'blocked' | 'disabled';
   
   qrData?: string; // QR code payload (ex: "MC:MC-001-20260823:4585020000258400")
   validFrom?: string; // Format MM/YY
@@ -182,6 +186,7 @@ export interface Notification {
   cardId?: string;
   cardName?: string;
   cardIdentifier?: string;
+  isUrgent?: boolean;
   deliveryId?: string;
 }
 
@@ -224,3 +229,28 @@ export interface CardDesignSettings {
 }
 
 
+
+
+export type LogLevel = 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR' | 'CRITICAL';
+export type LogCategory = 'AUTH' | 'FIRESTORE' | 'STORAGE' | 'PAYMENT' | 'CARD' | 'STOCK' | 'PHYSICAL_CARD' | 'DELIVERY' | 'USER' | 'NOTIFICATION' | 'HELP' | 'DESIGN' | 'SECURITY' | 'UI' | 'SYSTEM';
+
+export interface AppLog {
+  id?: string;
+  timestamp: number;
+  level: LogLevel;
+  category: LogCategory;
+  event: string;
+  message: string;
+  userId?: string;
+  userEmail?: string;
+  userRole?: string;
+  route?: string;
+  operation?: string;
+  collection?: string;
+  documentId?: string;
+  errorCode?: string;
+  errorName?: string;
+  stack?: string;
+  metadata?: any;
+  success?: boolean;
+}

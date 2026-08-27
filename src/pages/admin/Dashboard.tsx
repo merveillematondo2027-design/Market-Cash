@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { collection, getDocs, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { cardService, CardPricingSettings } from '../../services/cardService';
-import { 
+import {  
   Users, 
   CreditCard, 
   FileText, 
@@ -25,7 +25,7 @@ import {
   ChevronRight,
   TrendingUp,
   Sparkles
-} from 'lucide-react';
+, Library, Package } from 'lucide-react';
 import { CardPurchaseRequest, PhysicalCardRequest } from '../../types';
 
 export default function AdminDashboard() {
@@ -55,7 +55,7 @@ export default function AdminDashboard() {
 
   const [pricing, setPricing] = useState<CardPricingSettings>({
     virtualCardPrice: null,
-    physicalCardPrice: null,
+    physicalCardPrice: null, urgentPhysicalCardPrice: null,
     currency: 'USD'
   });
 
@@ -85,7 +85,7 @@ export default function AdminDashboard() {
       let physical = 0;
       cardsSnap.forEach(doc => {
         const c = doc.data();
-        if (c.status === 'available') available++;
+        if (c.saleStatus === 'available') available++;
         else assigned++;
 
         if (c.type === 'virtual') virtual++;
@@ -390,7 +390,7 @@ export default function AdminDashboard() {
 
         {/* Cards in Catalog */}
         <div 
-          onClick={() => navigate('/admin/cards')}
+          onClick={() => navigate('/admin/stock')}
           className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-md hover:border-purple-500 transition cursor-pointer flex flex-col justify-between"
         >
           <div className="flex justify-between items-start">
@@ -408,8 +408,30 @@ export default function AdminDashboard() {
         </div>
 
         {/* Pending Deliveries */}
-        <div 
-          onClick={() => navigate('/admin/deliveries')}
+        
+          <div 
+            onClick={() => navigate('/admin/library')}
+            className="bg-white p-5 rounded-[1.8rem] border border-slate-200/90 shadow-sm hover:shadow-md hover:border-purple-500 transition cursor-pointer flex flex-col justify-between group"
+          >
+            <div>
+              <div className="flex justify-between items-start mb-3">
+                <div className="w-12 h-12 rounded-2xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
+                  <Library size={24} />
+                </div>
+              </div>
+              <h3 className="font-black text-base text-slate-800 group-hover:text-purple-600 transition">Bibliothèque</h3>
+              <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
+                Archives des cartes attribuées et visuels prêts à imprimer.
+              </p>
+            </div>
+            <div className="flex items-center gap-1 text-xs font-bold text-purple-600 mt-4 pt-3 border-t border-slate-100">
+              <span>Ouvrir la bibliothèque</span>
+              <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
+            </div>
+          </div>
+
+
+<div onClick={() => navigate('/admin/deliveries')}
           className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-md hover:border-blue-500 transition cursor-pointer flex flex-col justify-between"
         >
           <div className="flex justify-between items-start">
@@ -456,7 +478,7 @@ export default function AdminDashboard() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* 1. Gestion des Cartes */}
           <div 
-            onClick={() => navigate('/admin/cards')}
+            onClick={() => navigate('/admin/stock')}
             className="bg-white p-5 rounded-[1.8rem] border border-slate-200/90 shadow-sm hover:shadow-md hover:border-blue-500 transition cursor-pointer flex flex-col justify-between group"
           >
             <div>
@@ -469,12 +491,10 @@ export default function AdminDashboard() {
                 </span>
               </div>
               <h3 className="font-black text-base text-slate-800 group-hover:text-blue-600 transition">Gestion des Cartes</h3>
-              <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
-                Catalogue, numéros de cartes, cartes virtuelles & physiques et stock.
-              </p>
+              <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">Gérez le stock de cartes vierges disponibles pour attribution automatique.</p>
             </div>
             <div className="flex items-center gap-1 text-xs font-bold text-blue-600 mt-4 pt-3 border-t border-slate-100">
-              <span>Gérer les cartes</span>
+              <span>Gérer le stock</span>
               <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
             </div>
           </div>

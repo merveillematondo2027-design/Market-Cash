@@ -1,3 +1,4 @@
+import { logService } from './logService';
 import { 
   collection, 
   doc, 
@@ -6,8 +7,7 @@ import {
   deleteDoc,
   getDoc, 
   getDocs, 
-  query, 
-  where, 
+  query, where, limit,  
   orderBy,
   runTransaction,
   onSnapshot
@@ -20,6 +20,7 @@ import { generateAndUploadPvcCard } from '../lib/pvcCardGenerator';
 export interface CardPricingSettings {
   virtualCardPrice: number | null;
   physicalCardPrice: number | null;
+  urgentPhysicalCardPrice: number | null;
   currency: string;
   isFallback?: boolean;
 }
@@ -27,6 +28,7 @@ export interface CardPricingSettings {
 export const DEFAULT_CARD_PRICING: CardPricingSettings = {
   virtualCardPrice: null,
   physicalCardPrice: null,
+  urgentPhysicalCardPrice: null,
   currency: 'USD',
   isFallback: true
 };
@@ -220,6 +222,7 @@ export const cardService = {
         return {
           virtualCardPrice: null,
           physicalCardPrice: null,
+  urgentPhysicalCardPrice: null,
           currency: 'USD',
           isFallback: true
         };
@@ -264,6 +267,7 @@ export const cardService = {
       callback({
         virtualCardPrice: null,
         physicalCardPrice: null,
+  urgentPhysicalCardPrice: null,
         currency: 'USD',
         isFallback: true
       });
@@ -273,11 +277,13 @@ export const cardService = {
   /**
    * Updates card pricing in Firestore
    */
-  async updatePricing(params: { virtualCardPrice: number | null; physicalCardPrice: number | null; currency?: string }): Promise<void> {
+  async updatePricing(params: { virtualCardPrice: number | null; physicalCardPrice: number | null;
+  urgentPhysicalCardPrice: number | null; currency?: string }): Promise<void> {
     const docRef = doc(db, 'app_settings', 'card_pricing');
     const payload = {
       virtualCardPrice: (params.virtualCardPrice !== null && params.virtualCardPrice > 0) ? Number(params.virtualCardPrice) : null,
       physicalCardPrice: (params.physicalCardPrice !== null && params.physicalCardPrice > 0) ? Number(params.physicalCardPrice) : null,
+      urgentPhysicalCardPrice: (params.urgentPhysicalCardPrice !== null && params.urgentPhysicalCardPrice > 0) ? Number(params.urgentPhysicalCardPrice) : null,
       currency: params.currency || 'USD',
       updatedAt: Date.now()
     };
@@ -285,6 +291,7 @@ export const cardService = {
     cachedPricingData = {
       virtualCardPrice: payload.virtualCardPrice,
       physicalCardPrice: payload.physicalCardPrice,
+      urgentPhysicalCardPrice: payload.urgentPhysicalCardPrice,
       currency: payload.currency,
       isFallback: false
     };
@@ -419,7 +426,7 @@ export const cardService = {
     const month = String(targetDate.getMonth() + 1).padStart(2, '0');
     const day = String(targetDate.getDate()).padStart(2, '0');
     const dateStr = `${year}${month}${day}`;
-    const counterDocId = `cards_${dateStr}`;
+    const counterDocId = `global_card_counter`;
     const counterRef = doc(db, 'counters', counterDocId);
 
     try {
@@ -432,19 +439,18 @@ export const cardService = {
         const updatedCount = currentCount + 1;
         transaction.set(counterRef, {
           count: updatedCount,
-          date: dateStr,
           lastGeneratedAt: Date.now()
         }, { merge: true });
         return updatedCount;
       });
 
       const orderStr = String(nextOrder).padStart(3, '0');
-      return `MC-${orderStr}-${dateStr}`;
+      return `MC-${orderStr}${dateStr}`;
     } catch (error) {
       console.warn('[TRANSACTION_FALLBACK_ID_GENERATION]', error);
       // Fallback in case of network glitch
       const randomOrder = Math.floor(100 + Math.random() * 900);
-      return `MC-${randomOrder}-${dateStr}`;
+      return `MC-${randomOrder}${dateStr}`;
     }
   },
 
@@ -515,7 +521,148 @@ export const cardService = {
   /**
    * Confirms the sale of a physical card, generates unique ID, renders PVC graphic, and registers to library.
    */
-  async confirmAndIssuePhysicalCard(params: {
+  
+  async addCardToStock(params: {
+    cardNumber: string;
+    cardHolder: string;
+    expiryStart: string;
+    expiryEnd: string;
+    cvv: string;
+    rechargeNumber?: string;
+    network: 'visa' | 'mastercard' | 'amex' | 'other';
+    type: 'virtual' | 'physical';
+    creator: { email: string; uid: string; agencyId?: string; agencyName?: string };
+  }): Promise<UserCard> {
+    const cardId = doc(collection(db, 'cards')).id;
+    const cardIdentifier = await this.generateUniqueCardIdentifier();
+    
+    const cleanCardNum = params.cardNumber.replace(/\s+/g, '');
+    
+    const newCard: UserCard = {
+      id: cardId,
+      cardId,
+      cardIdentifier,
+      userId: '',
+      userName: '',
+      userEmail: '',
+      cardNumber: cleanCardNum,
+      cardHolder: params.cardHolder.trim(),
+      cardHolderName: params.cardHolder.trim(),
+      expiryStart: params.expiryStart || '02/27',
+      expiryEnd: params.expiryEnd || '08/27',
+      expiry: params.expiryEnd || '08/27',
+      cvv: params.cvv || '551',
+      rechargeNumber: params.rechargeNumber?.trim() || undefined,
+      network: params.network || 'visa',
+      type: params.type,
+      status: 'disabled',
+      saleStatus: 'available',
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+    
+    await setDoc(doc(db, 'cards', cardId), removeUndefined(newCard));
+    return newCard;
+  },
+
+  async getAvailableStockCount(): Promise<{ virtual: number; physical: number }> {
+    const q = query(collection(db, 'cards'), where('saleStatus', '==', 'available'));
+    const snap = await getDocs(q);
+    let virtual = snap.size;
+    let physical = 0; // physical stock is no longer tracked this way
+    return { virtual, physical };
+  },
+
+  async approveRequestWithStock(requestId: string, _type: string, adminData: { uid: string, email: string }): Promise<UserCard> {
+    const requestRef = doc(db, 'card_purchase_requests', requestId);
+    const cardsRef = collection(db, 'cards');
+    
+    // We do a query to find available cards first, because we can't easily query with limit inside a transaction in all JS SDKs
+    const q = query(cardsRef, where('saleStatus', '==', 'available'), limit(10));
+    const availableDocs = await getDocs(q);
+    
+    if (availableDocs.empty) {
+      throw new Error('STOCK_EMPTY');
+    }
+    
+    // Try to atomically assign the first available one
+    let assignedCard: UserCard | null = null;
+    
+    for (const cardDoc of availableDocs.docs) {
+      try {
+        assignedCard = await runTransaction(db, async (transaction) => {
+          const cDoc = await transaction.get(cardDoc.ref);
+          if (!cDoc.exists() || cDoc.data().saleStatus !== 'available') {
+            throw new Error('CARD_UNAVAILABLE');
+          }
+          
+          const reqDoc = await transaction.get(requestRef);
+          if (!reqDoc.exists() || reqDoc.data().status !== 'pending') {
+            throw new Error('REQUEST_INVALID');
+          }
+          
+          const reqData = reqDoc.data();
+          const cardData = cDoc.data() as UserCard;
+          
+          // Update Card
+          const updatedCard = {
+            ...cardData,
+            userId: reqData.userId,
+            userName: reqData.userName || reqData.fullName,
+            userEmail: reqData.userEmail || reqData.clientEmail || '',
+            status: 'active',
+            saleStatus: 'sold',
+            soldAt: Date.now(),
+            soldBy: adminData.email,
+            updatedAt: Date.now()
+          };
+          
+          transaction.set(cardDoc.ref, removeUndefined(updatedCard), { merge: true });
+          
+          // Update Request
+          transaction.update(requestRef, {
+            status: 'approved',
+            assignedCardId: cardDoc.id,
+            processedAt: Date.now(),
+            processedBy: adminData.uid
+          });
+          
+          if (reqData.physicalOption === 'normal' || reqData.physicalOption === 'urgent') {
+            const physicalReqRef = doc(collection(db, 'physical_card_requests'));
+            transaction.set(physicalReqRef, {
+              id: physicalReqRef.id,
+              userId: reqData.userId,
+              userEmail: reqData.userEmail || '',
+              userName: reqData.userName || reqData.fullName || '',
+              cardId: cardData.cardId,
+              cardIdentifier: cardData.cardIdentifier,
+              isUrgent: reqData.physicalOption === 'urgent',
+              status: 'pending',
+              designChoice: 'default',
+              createdAt: Date.now(),
+              updatedAt: Date.now()
+            });
+          }
+          
+          return updatedCard as UserCard;
+        });
+        
+        if (assignedCard) break; // Successfully assigned
+      } catch (err: any) {
+        if (err.message === 'CARD_UNAVAILABLE') {
+          continue; // Try next card
+        }
+        throw err; // Other error, bubble up
+      }
+    }
+    
+    if (!assignedCard) {
+      throw new Error('STOCK_EMPTY'); // All tried cards were unavailable
+    }
+    
+    return assignedCard;
+  },
+async confirmAndIssuePhysicalCard(params: {
     userId: string;
     userName: string;
     userEmail?: string;

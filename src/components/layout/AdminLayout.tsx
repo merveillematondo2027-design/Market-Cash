@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Truck, User, Shield } from 'lucide-react';
+import { LayoutDashboard, Package, Library, Truck, User, Shield } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAuthStore } from '../../store/authStore';
 
@@ -7,11 +7,15 @@ export default function AdminLayout() {
   const location = useLocation();
   const { user } = useAuthStore();
 
+  
   const navItems = [
     { name: 'Tableau', fullName: 'Tableau de bord', path: '/admin/dashboard', icon: LayoutDashboard },
-    { name: 'Livraison', fullName: 'Livraisons', path: '/admin/deliveries', icon: Truck },
-    { name: 'Profil', fullName: 'Profil & Paramètres', path: '/admin/profile', icon: User },
+    { name: 'Stock', fullName: 'Stock', path: '/admin/stock', icon: Package },
+    { name: 'Biliothèque', fullName: 'Bibliothèque', path: '/admin/library', icon: Library },
+    { name: 'Livraison', fullName: 'Livraison', path: '/admin/deliveries', icon: Truck },
+    { name: 'Profil', fullName: 'Profil', path: '/admin/profile', icon: User },
   ];
+
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans text-slate-800 antialiased selection:bg-purple-600 selection:text-white">
@@ -28,7 +32,7 @@ export default function AdminLayout() {
                 Admin
               </span>
             </div>
-            <p className="text-[11px] text-blue-200 truncate max-w-[200px]">
+            <p className="text-[9px] text-blue-200 truncate max-w-[200px]">
               {user?.displayName || user?.email}
             </p>
           </div>
@@ -96,7 +100,7 @@ export default function AdminLayout() {
 
       {/* Mobile Bottom Nav - 3 primary modules */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200/90 px-4 py-2 z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
-        <div className="grid grid-cols-3 gap-2 max-w-md mx-auto">
+        <div className="grid grid-cols-5 gap-1 max-w-lg mx-auto">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname.startsWith(item.path);
@@ -105,7 +109,7 @@ export default function AdminLayout() {
                 key={item.name}
                 to={item.path}
                 className={cn(
-                  'flex flex-col items-center justify-center py-1.5 px-2 rounded-2xl transition-all duration-150 touch-manipulation',
+                  'flex flex-col items-center justify-center py-1 px-1 rounded-2xl transition-all duration-150 touch-manipulation',
                   isActive 
                     ? 'text-blue-950 font-black' 
                     : 'text-slate-400 hover:text-slate-600 font-medium'
