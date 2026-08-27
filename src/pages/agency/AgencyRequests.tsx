@@ -24,6 +24,12 @@ import {
   Building
 } from 'lucide-react';
 
+const MAX_NOTIFICATION_MESSAGE_LENGTH = 2000;
+const AGENCY_REJECTION_MESSAGE_PREFIX = "Votre demande a été refusée par l'agence. Motif : ";
+const AGENCY_REJECTION_MESSAGE_SUFFIX = '.';
+const MAX_AGENCY_REJECTION_REASON_LENGTH =
+  MAX_NOTIFICATION_MESSAGE_LENGTH - AGENCY_REJECTION_MESSAGE_PREFIX.length - AGENCY_REJECTION_MESSAGE_SUFFIX.length;
+
 export default function AgencyRequests() {
   const { user } = useAuthStore();
   const [requests, setRequests] = useState<CardPurchaseRequest[]>([]);
@@ -161,13 +167,25 @@ export default function AgencyRequests() {
     e.preventDefault();
     if (!rejectingReq || !user) return;
 
+    const cleanRejectionReason = rejectionReason.trim();
+    if (!cleanRejectionReason) {
+      toast.error('Raison du rejet obligatoire.');
+      return;
+    }
+
+    const notificationMessage = `${AGENCY_REJECTION_MESSAGE_PREFIX}${cleanRejectionReason}${AGENCY_REJECTION_MESSAGE_SUFFIX}`;
+    if (notificationMessage.length > MAX_NOTIFICATION_MESSAGE_LENGTH) {
+      toast.error(`Le message de notification ne peut pas dépasser ${MAX_NOTIFICATION_MESSAGE_LENGTH} caractères. Raccourcissez le motif.`);
+      return;
+    }
+
     setIsProcessing(true);
     try {
       await updateDoc(doc(db, 'card_purchase_requests', rejectingReq.id), {
         status: 'rejected',
         processedAt: Date.now(),
         processedBy: user.displayName || user.email,
-        rejectionReason: rejectionReason.trim() || 'Demande non conforme.',
+        rejectionReason: cleanRejectionReason,
         updatedAt: Date.now()
       });
 
@@ -175,7 +193,7 @@ export default function AgencyRequests() {
       await setDoc(doc(collection(db, 'notifications')), {
         userId: rejectingReq.userId,
         title: 'Demande d\'achat refusée',
-        message: `Votre demande a été refusée par l'agence. Motif : ${rejectionReason || 'Dossier incomplet'}.`,
+        message: notificationMessage,
         type: 'error',
         read: false,
         createdAt: Date.now()
@@ -485,12 +503,16 @@ export default function AgencyRequests() {
             <form onSubmit={handleReject} className="space-y-3">
               <textarea
                 required
+                maxLength={MAX_AGENCY_REJECTION_REASON_LENGTH}
                 rows={3}
                 placeholder="Ex : Paiement non vérifié, pièces justificatives manquantes..."
                 value={rejectionReason}
                 onChange={(e) => setRejectionReason(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-red-500 focus:outline-none"
               />
+              <p className="mt-1 text-[11px] text-slate-500">
+                {rejectionReason.length}/{MAX_AGENCY_REJECTION_REASON_LENGTH} caractères maximum
+              </p>
               <div className="flex gap-2">
                 <button
                   type="button"

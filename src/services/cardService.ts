@@ -505,6 +505,32 @@ export const cardService = {
     }
   },
 
+  async createDeliveryRoleNotification(
+    role: 'admin_general' | 'livreur',
+    deliveryId: string,
+    cardIdentifier: string
+  ) {
+    const notificationId = `${deliveryId}_${role}`;
+    const isAdminNotification = role === 'admin_general';
+    const notification = {
+      id: notificationId,
+      userId: role,
+      targetRole: role,
+      title: isAdminNotification ? 'Nouvelle demande de livraison' : 'Nouvelle course disponible',
+      message: isAdminNotification
+        ? 'Une nouvelle demande de livraison client est disponible.'
+        : 'Une nouvelle demande de livraison est disponible.',
+      type: 'info' as const,
+      read: false,
+      createdAt: Date.now(),
+      category: 'delivery',
+      cardIdentifier,
+      deliveryId
+    };
+
+    await setDoc(doc(db, 'notifications', notificationId), notification);
+  },
+
   /**
    * Notify all users with a specific role
    */
@@ -912,24 +938,10 @@ async confirmAndIssuePhysicalCard(params: {
       cardIdentifier: finalCardIdentifier
     });
 
-    try {
-      // Notify Admin & Chef d'Agence
-      await this.notifyRole(
-        'admin_general',
-        'Nouvelle demande de livraison',
-        `Le client ${params.userName || params.cardHolder || 'Client'} a programmé la livraison de sa carte ${finalCardIdentifier} pour le ${params.deliveryDate}.`,
-        finalCardIdentifier
-      );
-
-      await this.notifyRole(
-        'livreur',
-        'Nouvelle course disponible',
-        `Nouvelle demande de livraison de carte pour le ${params.deliveryDate} à ${params.deliveryAddress}.`,
-        finalCardIdentifier
-      );
-    } catch (e) {
-      console.warn('[DELIVERY_ROLE_NOTIFY_WARN]', e);
-    }
+    await Promise.all([
+      this.createDeliveryRoleNotification('admin_general', deliveryId, finalCardIdentifier),
+      this.createDeliveryRoleNotification('livreur', deliveryId, finalCardIdentifier)
+    ]);
 
     // Notify Client
     await this.createNotification({

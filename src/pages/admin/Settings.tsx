@@ -23,6 +23,8 @@ import {
   ShieldAlert
 } from 'lucide-react';
 
+const ALLOWED_CARD_DESIGN_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+
 const MOCK_PREVIEW_CARD: Partial<UserCard> = {
   cardId: 'MC-DEMO-001',
   cardIdentifier: 'MC-DEMO-001',
@@ -74,8 +76,8 @@ export default function AdminSettings() {
   }, []);
 
   const handleFileSelect = (file: File) => {
-    if (!file.type.startsWith('image/')) {
-      toast.error('Veuillez sélectionner un fichier image valide (JPG, PNG, WebP).');
+    if (!ALLOWED_CARD_DESIGN_TYPES.includes(file.type.toLowerCase())) {
+      toast.error('Format non autorisé. Utilisez uniquement une image JPEG/JPG, PNG ou WebP.');
       return;
     }
 

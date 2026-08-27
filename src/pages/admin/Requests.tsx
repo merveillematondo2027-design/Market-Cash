@@ -37,6 +37,14 @@ import {
 import { useAuthStore } from '../../store/authStore';
 import { cardService } from '../../services/cardService';
 
+const MAX_NOTIFICATION_MESSAGE_LENGTH = 2000;
+
+const getAdminRejectionMessage = (cardName: string, reason: string) =>
+  `Votre demande pour la carte ${cardName} n'a pas pu être validée. Motif : ${reason}`;
+
+const getAdminRejectionReasonLimit = (cardName: string) =>
+  Math.max(0, MAX_NOTIFICATION_MESSAGE_LENGTH - getAdminRejectionMessage(cardName, '').length);
+
 export default function AdminRequests() {
   const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState<'purchases' | 'deliveries'>('purchases');
@@ -220,8 +228,21 @@ export default function AdminRequests() {
   const handleReject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedRequest || !user) return;
-    if (!rejectionReason.trim()) {
+    const cleanRejectionReason = rejectionReason.trim();
+    if (!cleanRejectionReason) {
       toast.error('Raison du rejet obligatoire.');
+      return;
+    }
+
+    const notificationTitle = `Demande refusée : ${selectedRequest.cardName}`;
+    const notificationMessage = getAdminRejectionMessage(selectedRequest.cardName, cleanRejectionReason);
+    if (notificationTitle.length > 200) {
+      toast.error('Le titre de la notification dépasse 200 caractères.');
+      return;
+    }
+
+    if (notificationMessage.length > MAX_NOTIFICATION_MESSAGE_LENGTH) {
+      toast.error(`Le message de notification ne peut pas dépasser ${MAX_NOTIFICATION_MESSAGE_LENGTH} caractères. Raccourcissez le motif.`);
       return;
     }
 
@@ -229,15 +250,15 @@ export default function AdminRequests() {
     try {
       await updateDoc(doc(db, 'card_purchase_requests', selectedRequest.id), {
         status: 'rejected',
-        rejectionReason,
+        rejectionReason: cleanRejectionReason,
         processedAt: Date.now(),
         processedBy: user.email
       });
 
       await cardService.createNotification({
         userId: selectedRequest.userId,
-        title: `Demande refusée : ${selectedRequest.cardName}`,
-        message: `Votre demande pour la carte ${selectedRequest.cardName} n'a pas pu être validée. Motif : ${rejectionReason}`,
+        title: notificationTitle,
+        message: notificationMessage,
         type: 'error',
         requestId: selectedRequest.id,
         cardName: selectedRequest.cardName
@@ -664,11 +685,15 @@ export default function AdminRequests() {
               <label className="block text-xs font-bold text-slate-700 mb-2 uppercase">Raison du rejet (Obligatoire)</label>
               <textarea 
                 required
+                maxLength={getAdminRejectionReasonLimit(selectedRequest.cardName)}
                 value={rejectionReason}
                 onChange={e => setRejectionReason(e.target.value)}
                 placeholder="Ex: Preuve de paiement non valide ou référence introuvable"
                 className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-red-500 font-medium text-slate-800 text-xs h-28 resize-none" 
               />
+              <p className="mt-1 text-xs text-slate-500">
+                {rejectionReason.length}/{getAdminRejectionReasonLimit(selectedRequest.cardName)} caractères maximum
+              </p>
             </div>
             <div className="flex space-x-3 pt-2">
               <button 

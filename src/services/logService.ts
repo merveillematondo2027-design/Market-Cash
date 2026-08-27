@@ -1,5 +1,5 @@
-import { collection, addDoc, doc, setDoc } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import { collection, addDoc } from 'firebase/firestore';
+import { auth, db } from '../firebase/config';
 import { AppLog, LogLevel, LogCategory } from '../types';
 
 export const logService = {
@@ -9,13 +9,23 @@ export const logService = {
         ...log,
         timestamp: Date.now()
       };
+
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        logData.userId = currentUser.uid;
+        logData.userEmail = currentUser.email || '';
+      }
       // Removing potentially undefined fields that Firestore doesn't like
       Object.keys(logData).forEach(key => {
         if ((logData as any)[key] === undefined) {
           delete (logData as any)[key];
         }
       });
-      await addDoc(collection(db, 'appLogs'), logData);
+      // Anonymous authentication attempts stay in the local console. Firestore
+      // only receives logs tied to the authenticated Firebase UID.
+      if (currentUser) {
+        await addDoc(collection(db, 'appLogs'), logData);
+      }
       
       // Also log to console for visibility (without secrets)
       if (log.level === 'ERROR' || log.level === 'CRITICAL') {

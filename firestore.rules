@@ -17,36 +17,88 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
 
+    function isBootstrapAdminEmail() {
+      return isSignedIn() && request.auth.token.email in [
+        'merveillematondo2027@gmail.com',
+        'emmanuelmungwele1@gmail.com'
+      ];
+    }
+
+    function isOfficialRole(role) {
+      return role in [
+        'client',
+        'admin_general',
+        'chef_agence',
+        'designer_graphique',
+        'livreur'
+      ];
+    }
+
     function isAdminGeneral() {
       return isSignedIn() && (
-        (request.auth.token != null && (request.auth.token.email == 'merveillematondo2027@gmail.com' || request.auth.token.email == 'emmanuelmungwele1@gmail.com')) ||
-        getUserRole() == 'admin_general' || getUserRole() == 'admin'
+        isBootstrapAdminEmail() ||
+        getUserRole() == 'admin_general'
       );
     }
 
     function isChefAgence() {
       return isSignedIn() && (
         isAdminGeneral() ||
-        getUserRole() == 'chef_agence' || getUserRole() == 'chef'
+        getUserRole() == 'chef_agence'
       );
     }
 
     function isDesignerGraphique() {
       return isSignedIn() && (
         isAdminGeneral() ||
-        getUserRole() == 'designer_graphique' || getUserRole() == 'designer'
+        getUserRole() == 'designer_graphique'
       );
     }
 
     function isLivreur() {
       return isSignedIn() && (
         isAdminGeneral() ||
-        getUserRole() == 'livreur' || getUserRole() == 'delivery'
+        getUserRole() == 'livreur'
       );
     }
 
     function isStaff() {
       return isAdminGeneral() || isChefAgence() || isDesignerGraphique() || isLivreur();
+    }
+
+    function isClientDeliveryRoleNotification(notificationId) {
+      let deliveryId = request.resource.data.deliveryId;
+      let targetRole = request.resource.data.userId;
+      let delivery = get(/databases/$(database)/documents/physical_card_requests/$(deliveryId));
+
+      return getUserRole() == 'client'
+        && targetRole in ['admin_general', 'livreur']
+        && request.resource.data.keys().hasOnly([
+          'id', 'userId', 'targetRole', 'title', 'message', 'type', 'read',
+          'createdAt', 'category', 'cardIdentifier', 'deliveryId'
+        ])
+        && request.resource.data.id == notificationId
+        && request.resource.data.targetRole == targetRole
+        && notificationId == deliveryId + '_' + targetRole
+        && request.resource.data.category == 'delivery'
+        && request.resource.data.type == 'info'
+        && request.resource.data.cardIdentifier is string
+        && exists(/databases/$(database)/documents/physical_card_requests/$(deliveryId))
+        && delivery.data.userId == request.auth.uid
+        && delivery.data.status == 'pending'
+        && delivery.data.cardIdentifier == request.resource.data.cardIdentifier
+        && (
+          (
+            targetRole == 'admin_general'
+            && request.resource.data.title == 'Nouvelle demande de livraison'
+            && request.resource.data.message == 'Une nouvelle demande de livraison client est disponible.'
+          )
+          || (
+            targetRole == 'livreur'
+            && request.resource.data.title == 'Nouvelle course disponible'
+            && request.resource.data.message == 'Une nouvelle demande de livraison est disponible.'
+          )
+        );
     }
 
     // ==============================
@@ -65,8 +117,19 @@ service cloud.firestore {
     // ==============================
     // COUNTERS (Card ID generator)
     // ==============================
-    match /counters/{counterId} {
-      allow read, write: if isSignedIn(); // We can make it tighter later if needed, but atomicity requires write access
+    match /counters/global_card_counter {
+      allow read: if isChefAgence();
+      allow create: if isChefAgence()
+                    && request.resource.data.keys().hasOnly(['count', 'lastGeneratedAt'])
+                    && request.resource.data.count is int
+                    && request.resource.data.count == 1
+                    && request.resource.data.lastGeneratedAt is int;
+      allow update: if isChefAgence()
+                    && request.resource.data.keys().hasOnly(['count', 'lastGeneratedAt'])
+                    && request.resource.data.count is int
+                    && request.resource.data.count == resource.data.count + 1
+                    && request.resource.data.lastGeneratedAt is int;
+      allow delete: if isAdminGeneral();
     }
 
     // ==============================
@@ -76,17 +139,45 @@ service cloud.firestore {
       // Lecture : l'utilisateur lit son propre profil. Le staff lit pour les opérations métiers.
       allow read: if isOwner(userId) || isStaff();
       
-      // Création : Un client crée son profil
-      allow create: if isOwner(userId) || isAdminGeneral();
+      // Un compte crée uniquement son propre profil client. Les deux comptes
+      // administrateurs historiques peuvent conserver admin_general.
+      allow create: if
+        (
+          isOwner(userId)
+          && request.resource.data.uid == userId
+          && (
+            request.resource.data.role == 'client'
+            || (isBootstrapAdminEmail() && request.resource.data.role == 'admin_general')
+          )
+        )
+        || (
+          isAdminGeneral()
+          && request.resource.data.uid == userId
+          && isOfficialRole(request.resource.data.role)
+        );
       
-      // Modification : Le client modifie ses infos sans changer son rôle ni son uid
+      // Un utilisateur ne peut modifier que ses champs de profil non privilégiés.
+      // Seul l'Administrateur Général peut attribuer un rôle officiel.
       allow update: if 
         (
           isOwner(userId) 
           && request.resource.data.uid == request.auth.uid 
           && request.resource.data.role == resource.data.role
+          && request.resource.data.email == resource.data.email
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'displayName',
+            'phone',
+            'avatar',
+            'pinHash',
+            'useBiometrics',
+            'updatedAt'
+          ])
         )
-        || isAdminGeneral();
+        || (
+          isAdminGeneral()
+          && request.resource.data.uid == userId
+          && isOfficialRole(request.resource.data.role)
+        );
         
       // Suppression réservée à l'administrateur général.
       allow delete: if isAdminGeneral();
@@ -182,17 +273,57 @@ service cloud.firestore {
     match /notifications/{notificationId} {
       allow read: if 
         isSignedIn() && (
+          isAdminGeneral() ||
           resource.data.userId == request.auth.uid || 
           resource.data.userId == 'all' || 
-          isChefAgence()
+          resource.data.userId == getUserRole()
         );
       
-      allow create: if isSignedIn();
+      allow create: if
+        isSignedIn()
+        && request.resource.data.keys().hasAll([
+          'userId', 'title', 'message', 'type', 'read', 'createdAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'id', 'userId', 'targetRole', 'title', 'message', 'type', 'read',
+          'createdAt', 'category', 'requestId', 'cardId', 'cardName',
+          'cardIdentifier', 'isUrgent', 'deliveryId'
+        ])
+        && request.resource.data.userId is string
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 200
+        && request.resource.data.message is string
+        && request.resource.data.message.size() > 0
+        && request.resource.data.message.size() <= 2000
+        && request.resource.data.type in ['success', 'error', 'info']
+        && request.resource.data.read == false
+        && request.resource.data.createdAt is int
+        && (
+          isStaff()
+          || request.resource.data.userId == request.auth.uid
+          || isClientDeliveryRoleNotification(notificationId)
+        );
       
       allow update: if 
-        isSignedIn() && (resource.data.userId == request.auth.uid || isStaff());
+        isSignedIn()
+        && (
+          isAdminGeneral()
+          || resource.data.userId == request.auth.uid
+          || resource.data.userId == 'all'
+          || resource.data.userId == getUserRole()
+        )
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+        && request.resource.data.read is bool;
         
-      allow delete: if isAdminGeneral();
+      allow delete: if
+        isSignedIn()
+        && (
+          isAdminGeneral()
+          || resource.data.userId == request.auth.uid
+          || resource.data.userId == 'all'
+          || resource.data.userId == getUserRole()
+        );
     }
 
     // ==============================
@@ -209,8 +340,29 @@ service cloud.firestore {
     // ==============================
     match /appLogs/{logId} {
       allow read, delete: if isAdminGeneral();
-      allow create: if request.resource.data.keys().hasAll(['timestamp', 'level', 'category', 'event', 'message']) 
-                    && request.resource.data.level in ['INFO', 'SUCCESS', 'WARNING', 'ERROR', 'CRITICAL'];
+      allow create: if
+        isSignedIn()
+        && request.resource.data.keys().hasAll([
+          'timestamp', 'level', 'category', 'event', 'message', 'userId'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'timestamp', 'level', 'category', 'event', 'message', 'userId',
+          'userEmail', 'userRole', 'route', 'operation', 'collection',
+          'documentId', 'errorCode', 'errorName', 'stack', 'metadata', 'success'
+        ])
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.timestamp is int
+        && request.resource.data.level in ['INFO', 'SUCCESS', 'WARNING', 'ERROR', 'CRITICAL']
+        && request.resource.data.category in [
+          'AUTH', 'FIRESTORE', 'STORAGE', 'PAYMENT', 'CARD', 'STOCK',
+          'PHYSICAL_CARD', 'DELIVERY', 'USER', 'NOTIFICATION', 'HELP',
+          'DESIGN', 'SECURITY', 'UI', 'SYSTEM'
+        ]
+        && request.resource.data.event is string
+        && request.resource.data.event.size() > 0
+        && request.resource.data.event.size() <= 150
+        && request.resource.data.message is string
+        && request.resource.data.message.size() <= 4000;
       allow update: if false;
     }
 

@@ -5,6 +5,9 @@ import { Notification, User } from '../../types';
 import toast from 'react-hot-toast';
 import { Plus, Trash2 } from 'lucide-react';
 
+const MAX_NOTIFICATION_TITLE_LENGTH = 200;
+const MAX_NOTIFICATION_MESSAGE_LENGTH = 2000;
+
 export default function AdminNotifications() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -36,11 +39,31 @@ export default function AdminNotifications() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    const title = formData.title?.trim() || '';
+    const message = formData.message?.trim() || '';
+
+    if (!title || !message) {
+      toast.error('Le titre et le message sont obligatoires.');
+      return;
+    }
+
+    if (title.length > MAX_NOTIFICATION_TITLE_LENGTH) {
+      toast.error(`Le titre ne peut pas dépasser ${MAX_NOTIFICATION_TITLE_LENGTH} caractères.`);
+      return;
+    }
+
+    if (message.length > MAX_NOTIFICATION_MESSAGE_LENGTH) {
+      toast.error(`Le message ne peut pas dépasser ${MAX_NOTIFICATION_MESSAGE_LENGTH} caractères.`);
+      return;
+    }
+
     try {
       const id = doc(collection(db, 'notifications')).id;
       const notification: Notification = {
         ...formData,
         id,
+        title,
+        message,
         read: false,
         createdAt: Date.now(),
       } as Notification;
@@ -144,11 +167,13 @@ export default function AdminNotifications() {
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Titre</label>
-                <input required type="text" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} className="w-full p-2 border rounded-lg" />
+                <input required type="text" maxLength={MAX_NOTIFICATION_TITLE_LENGTH} value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} className="w-full p-2 border rounded-lg" />
+                <p className="mt-1 text-xs text-slate-500">{formData.title?.length || 0}/{MAX_NOTIFICATION_TITLE_LENGTH} caractères</p>
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Message</label>
-                <textarea required value={formData.message} onChange={e => setFormData({...formData, message: e.target.value})} className="w-full p-2 border rounded-lg h-24" />
+                <textarea required maxLength={MAX_NOTIFICATION_MESSAGE_LENGTH} value={formData.message} onChange={e => setFormData({...formData, message: e.target.value})} className="w-full p-2 border rounded-lg h-24" />
+                <p className="mt-1 text-xs text-slate-500">{formData.message?.length || 0}/{MAX_NOTIFICATION_MESSAGE_LENGTH} caractères maximum</p>
               </div>
             </div>
             <div className="flex space-x-4 mt-8">

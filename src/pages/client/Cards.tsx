@@ -20,7 +20,6 @@ import { PaymentMethodItem } from '../../types';
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
 
 export default function ClientCards() {
   const { user } = useAuthStore();
@@ -461,7 +460,7 @@ export default function ClientCards() {
         }
       });
 
-      toast.success('Demande de livraison envoyée avec succès ! Nos livreurs et chefs d\'agence ont été notifiés.');
+      toast.success('Demande de livraison envoyée avec succès ! Nos livreurs et administrateurs ont été notifiés.');
       setCardForDelivery(null);
       setDeliveryDate('');
       setDeliveryAddress('');
@@ -486,11 +485,10 @@ export default function ClientCards() {
       return;
     }
 
-    const fileExt = '.' + file.name.split('.').pop()?.toLowerCase();
-    const isAllowedType = ALLOWED_IMAGE_TYPES.includes(file.type.toLowerCase()) || ALLOWED_EXTENSIONS.includes(fileExt);
+    const isAllowedType = ALLOWED_IMAGE_TYPES.includes(file.type.toLowerCase());
 
     if (!isAllowedType) {
-      toast.error('Format non supporté. Veuillez sélectionner une image JPG, JPEG, PNG ou WEBP.');
+      toast.error('Format MIME non supporté. Veuillez sélectionner une image JPEG/JPG, PNG ou WebP valide.');
       e.target.value = '';
       setProofFile(null);
       return;
