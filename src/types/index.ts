@@ -106,7 +106,7 @@ export interface PhysicalCardRequest {
     lng: number;
     accuracy?: number;
     address?: string;
-  }; // Localisation géographique obligatoire
+  }; // Coordonnées GPS facultatives pour les anciennes/nouvelles demandes
   status: DeliveryStatus;
   assignedLivreurId?: string;
   assignedLivreurName?: string;

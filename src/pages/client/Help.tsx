@@ -18,6 +18,7 @@ import {
   Search
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { MARKET_CASH_SUPPORT_DISPLAY_NUMBER, openWhatsAppSupport } from '../../lib/whatsappSupport';
 
 export default function ClientHelp() {
   const [articles, setArticles] = useState<HelpArticle[]>([]);
@@ -42,7 +43,7 @@ export default function ClientHelp() {
   }, []);
 
   const contactSupport = () => {
-    window.open('https://wa.me/243820743730', '_blank');
+    openWhatsAppSupport('CLIENT_HELP_CENTER');
   };
 
   const handleOpenVideoPlatform = (platform: 'youtube' | 'facebook' | 'instagram' | 'tiktok') => {
@@ -187,6 +188,7 @@ export default function ClientHelp() {
         <p className="text-xs text-slate-600 max-w-md mx-auto leading-relaxed">
           Notre service client officiel Market-Cash est disponible 7j/7 pour vous assister via WhatsApp.
         </p>
+        <p className="text-lg font-black text-emerald-800 tracking-wide">{MARKET_CASH_SUPPORT_DISPLAY_NUMBER}</p>
         <div className="pt-2">
           <button
             onClick={contactSupport}

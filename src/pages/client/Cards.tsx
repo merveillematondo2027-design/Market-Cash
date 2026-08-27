@@ -72,8 +72,7 @@ export default function ClientCards() {
   const [deliveryDate, setDeliveryDate] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [deliveryPhone, setDeliveryPhone] = useState('');
-  const [gpsLocation, setGpsLocation] = useState<{ latitude: number; longitude: number; accuracy?: number } | null>(null);
-  const [isGettingGps, setIsGettingGps] = useState(false);
+  const [deliveryLandmark, setDeliveryLandmark] = useState('');
   const [submittingDelivery, setSubmittingDelivery] = useState(false);
 
   // Recharge Screen State
@@ -181,6 +180,14 @@ export default function ClientCards() {
       const targetCard = myCards.find(c => c.id === cardIdParam || c.cardId === cardIdParam || c.cardIdentifier === cardIdParam);
       if (targetCard) {
         setCardForDelivery(targetCard);
+        setDeliveryDate('');
+        setDeliveryAddress('');
+        setDeliveryPhone(user?.phone || '');
+        setDeliveryLandmark('');
+        console.log('[DELIVERY_MODAL_OPEN]', {
+          cardId: targetCard.cardId || targetCard.id || targetCard.cardIdentifier || '',
+          userId: user?.uid || ''
+        });
         // Clear params to avoid reopen on reload
         const newParams = new URLSearchParams(searchParams);
         newParams.delete('delivery');
@@ -322,61 +329,22 @@ export default function ClientCards() {
     }
   };
 
-  // Capture GPS Location
-  const handleGetCurrentLocation = () => {
-    if (!navigator.geolocation) {
-      toast.error("La géolocalisation n'est pas supportée par votre navigateur.");
-      return;
-    }
+  const openDeliveryModal = (card: UserCard) => {
+    const cardId = card.cardId || card.id || card.cardIdentifier || '';
+    setCardForDelivery(card);
+    setDeliveryDate('');
+    setDeliveryAddress('');
+    setDeliveryPhone(user?.phone || '');
+    setDeliveryLandmark('');
+    console.log('[DELIVERY_MODAL_OPEN]', { cardId, userId: user?.uid || '' });
+  };
 
-    if (
-      typeof window !== 'undefined' &&
-      window.location.protocol !== 'https:' &&
-      window.location.hostname !== 'localhost' &&
-      window.location.hostname !== '127.0.0.1'
-    ) {
-      toast.error("La géolocalisation nécessite une connexion sécurisée (HTTPS).");
-      return;
-    }
-
-    setIsGettingGps(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setGpsLocation({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy
-        });
-        setIsGettingGps(false);
-        toast.success(`Position GPS enregistrée avec succès (Précision: ~${Math.round(position.coords.accuracy)}m)`);
-      },
-      (error) => {
-        const errDetails = {
-          code: error.code,
-          codeName: error.code === 1 
-            ? 'PERMISSION_DENIED' 
-            : error.code === 2 
-              ? 'POSITION_UNAVAILABLE' 
-              : error.code === 3 
-                ? 'TIMEOUT' 
-                : 'UNKNOWN',
-          message: error.message || ''
-        };
-        console.error('[GEOLOCATION_ERROR]', errDetails);
-        setIsGettingGps(false);
-
-        if (error.code === 1) {
-          toast.error("Accès GPS refusé. Veuillez autoriser la localisation dans les paramètres de votre navigateur/appareil.");
-        } else if (error.code === 2) {
-          toast.error("Position GPS indisponible. Vérifiez que la localisation GPS est activée sur votre appareil.");
-        } else if (error.code === 3) {
-          toast.error("Délai d'attente de localisation dépassé. Veuillez vous déplacer dans une zone dégagée et réessayer.");
-        } else {
-          toast.error(error.message || "Impossible d'obtenir la position GPS. Vérifiez les autorisations de votre appareil.");
-        }
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
-    );
+  const closeDeliveryModal = () => {
+    setCardForDelivery(null);
+    setDeliveryDate('');
+    setDeliveryAddress('');
+    setDeliveryPhone('');
+    setDeliveryLandmark('');
   };
 
   // Physical Card Delivery Request Submit
@@ -395,6 +363,13 @@ export default function ClientCards() {
       cardForDelivery.cardId || 
       cardForDelivery.cardIdentifier || 
       null;
+
+    console.log('[DELIVERY_FORM_VALIDATE]', {
+      hasAddress: deliveryAddress.trim().length >= 5,
+      hasWhatsapp: deliveryPhone.trim().length >= 5,
+      hasDate: Boolean(deliveryDate),
+      hasLocation: Boolean(deliveryLandmark.trim())
+    });
 
     if (!cardId || !cardIdentifier) {
       toast.error("Impossible d'identifier la carte sélectionnée.");
@@ -416,27 +391,10 @@ export default function ClientCards() {
       return;
     }
 
-    if (
-      !gpsLocation || 
-      typeof gpsLocation.latitude !== 'number' || 
-      typeof gpsLocation.longitude !== 'number' ||
-      isNaN(gpsLocation.latitude) ||
-      isNaN(gpsLocation.longitude)
-    ) {
-      toast.error('Veuillez enregistrer votre position GPS exacte pour faciliter la livraison.');
-      return;
-    }
-
-    console.log('[DELIVERY_REQUEST_START]');
-    console.log({
+    console.log('[DELIVERY_REQUEST_START]', {
       cardId,
       cardIdentifier,
-      userId: user.uid,
-      deliveryDate,
-      whatsappNumber: deliveryPhone.trim(),
-      deliveryAddress: deliveryAddress.trim(),
-      latitude: gpsLocation.latitude,
-      longitude: gpsLocation.longitude
+      userId: user.uid
     });
 
     setSubmittingDelivery(true);
@@ -452,22 +410,16 @@ export default function ClientCards() {
         whatsapp: deliveryPhone.trim(),
         deliveryDate: deliveryDate,
         deliveryAddress: deliveryAddress.trim(),
-        location: {
-          lat: gpsLocation.latitude,
-          lng: gpsLocation.longitude,
-          accuracy: gpsLocation.accuracy || 0,
-          address: deliveryAddress.trim()
-        }
+        deliveryNote: deliveryLandmark.trim() || undefined
       });
 
       toast.success('Demande de livraison envoyée avec succès ! Nos livreurs et administrateurs ont été notifiés.');
-      setCardForDelivery(null);
-      setDeliveryDate('');
-      setDeliveryAddress('');
-      setDeliveryPhone('');
-      setGpsLocation(null);
+      closeDeliveryModal();
     } catch (error: any) {
-      console.error('[DELIVERY_REQUEST_ERROR]', error);
+      console.error('[DELIVERY_REQUEST_ERROR]', {
+        code: error?.code || 'unknown',
+        message: error?.message || 'Erreur inconnue'
+      });
       toast.error("Impossible d'envoyer la demande pour le moment. Vérifiez les informations de livraison et réessayez.");
     } finally {
       setSubmittingDelivery(false);
@@ -738,7 +690,7 @@ export default function ClientCards() {
                     {/* BOUTON 1: Commander la carte physique */}
                     <button
                       type="button"
-                      onClick={() => setCardForDelivery(card)}
+                      onClick={() => openDeliveryModal(card)}
                       className="w-full min-h-[46px] py-3 px-4 bg-blue-950 hover:bg-blue-900 active:scale-[0.99] text-white font-black text-xs sm:text-sm rounded-2xl transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer group"
                     >
                       <Truck size={16} className="text-amber-400 group-hover:scale-110 transition-transform" />
@@ -998,33 +950,31 @@ export default function ClientCards() {
 
       {/* PHYSICAL CARD DELIVERY REQUEST MODAL */}
       {cardForDelivery && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
-          <div className="bg-white rounded-[2.5rem] w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh] shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center p-6 border-b border-slate-100">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-2.5 sm:p-4">
+          <div className="bg-white rounded-[1.75rem] sm:rounded-[2.5rem] w-full max-w-lg overflow-hidden flex flex-col max-h-[calc(100dvh-1.25rem)] sm:max-h-[90dvh] shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center p-4 sm:p-6 border-b border-slate-100 shrink-0 bg-white">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center">
                   <Truck size={20} />
                 </div>
                 <div>
-                  <h3 className="font-black text-xl text-slate-900 tracking-tight">Commander la carte physique</h3>
+                  <h3 className="font-black text-lg sm:text-xl text-slate-900 tracking-tight">Commander une livraison</h3>
                   <p className="text-xs text-slate-500 font-medium">Livraison directement à votre adresse</p>
                 </div>
               </div>
               <button 
-                onClick={() => {
-                  setCardForDelivery(null);
-                  setDeliveryDate('');
-                  setDeliveryAddress('');
-                }} 
+                type="button"
+                onClick={closeDeliveryModal}
                 className="p-2 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-full transition-colors cursor-pointer"
+                aria-label="Fermer la demande de livraison"
               >
                 <X size={22} />
               </button>
             </div>
 
-            <form onSubmit={handlePhysicalDeliverySubmit} className="p-6 overflow-y-auto space-y-4">
+            <form onSubmit={handlePhysicalDeliverySubmit} className="flex-1 min-h-0 p-4 sm:p-6 overflow-y-auto overscroll-contain space-y-4 sm:space-y-5">
               {/* Card preview badge */}
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex items-center justify-between">
+              <div className="bg-gradient-to-r from-blue-50 to-slate-50 p-4 rounded-2xl border border-blue-100 flex items-center justify-between gap-3">
                 <div>
                   <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Carte sélectionnée</span>
                   <span className="text-sm font-black text-slate-800 font-mono">
@@ -1044,6 +994,7 @@ export default function ClientCards() {
                   type="text"
                   value={deliveryAddress}
                   onChange={e => setDeliveryAddress(e.target.value)}
+                  maxLength={300}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none transition-all font-semibold text-slate-800 text-sm"
                   placeholder="Ex: Agence Gombe, Kinshasa"
                   required
@@ -1058,18 +1009,56 @@ export default function ClientCards() {
                   type="date"
                   value={deliveryDate}
                   onChange={e => setDeliveryDate(e.target.value)}
+                  min={new Date().toISOString().split('T')[0]}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none transition-all font-semibold text-slate-800 text-sm"
                   required
                 />
               </div>
 
-              <div className="pt-2">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
+                  Numéro WhatsApp <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <Smartphone size={17} className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-600" />
+                  <input
+                    type="tel"
+                    value={deliveryPhone}
+                    onChange={e => setDeliveryPhone(e.target.value)}
+                    maxLength={30}
+                    className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:border-emerald-500 focus:bg-white outline-none transition-all font-semibold text-slate-800 text-sm"
+                    placeholder="Ex : 0820742730"
+                    autoComplete="tel"
+                    required
+                  />
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-500">Ce numéro permettra au livreur ou à l’agence de vous contacter.</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
+                  Localisation / Point de repère <span className="text-slate-400 normal-case tracking-normal">(facultatif)</span>
+                </label>
+                <div className="relative">
+                  <MapPin size={17} className="absolute left-4 top-3.5 text-blue-600" />
+                  <textarea
+                    value={deliveryLandmark}
+                    onChange={e => setDeliveryLandmark(e.target.value)}
+                    maxLength={300}
+                    rows={2}
+                    className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none transition-all font-semibold text-slate-800 text-sm resize-none"
+                    placeholder="Commune, quartier ou point de repère utile"
+                  />
+                </div>
+              </div>
+
+              <div className="sticky bottom-0 -mx-1 pt-3 pb-1 bg-gradient-to-t from-white via-white to-white/80">
                 <button
                   type="submit"
-                  disabled={isSubmitting || !deliveryAddress || !deliveryDate}
+                  disabled={submittingDelivery || !deliveryAddress.trim() || !deliveryDate || !deliveryPhone.trim()}
                   className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-blue-950 font-black rounded-2xl transition-all shadow-lg shadow-amber-500/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                 >
-                  {isSubmitting ? 'Traitement...' : 'Confirmer la demande de livraison'}
+                  {submittingDelivery ? 'Traitement...' : 'Confirmer la demande de livraison'}
                 </button>
               </div>
             </form>

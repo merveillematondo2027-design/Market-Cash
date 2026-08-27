@@ -855,7 +855,7 @@ async confirmAndIssuePhysicalCard(params: {
   },
 
   /**
-   * Client submits a delivery request with mandatory GPS location, whatsapp, and delivery date.
+   * Client submits a delivery request with contact details and optional location data.
    */
   async submitDeliveryRequest(params: {
     userId: string;
@@ -868,7 +868,8 @@ async confirmAndIssuePhysicalCard(params: {
     deliveryDate: string;
     deliveryAddress: string;
     whatsapp: string;
-    location: { lat: number; lng: number; accuracy?: number; address?: string };
+    deliveryNote?: string;
+    location?: { lat: number; lng: number; accuracy?: number; address?: string };
     agencyId?: string;
   }): Promise<string> {
     const finalCardId = params.cardId || params.cardIdentifier || '';
@@ -889,16 +890,6 @@ async confirmAndIssuePhysicalCard(params: {
     if (!params.deliveryAddress) {
       throw new Error("Adresse de livraison requise.");
     }
-    if (
-      !params.location || 
-      typeof params.location.lat !== 'number' || 
-      typeof params.location.lng !== 'number' ||
-      isNaN(params.location.lat) ||
-      isNaN(params.location.lng)
-    ) {
-      throw new Error("Position GPS requise et valide.");
-    }
-
     const deliveryId = doc(collection(db, 'physical_card_requests')).id;
     const now = Date.now();
 
@@ -915,14 +906,15 @@ async confirmAndIssuePhysicalCard(params: {
       deliveryAddress: params.deliveryAddress,
       whatsapp: params.whatsapp,
       whatsappNumber: params.whatsapp,
-      latitude: params.location.lat,
-      longitude: params.location.lng,
-      location: {
+      deliveryNote: params.deliveryNote?.trim() || undefined,
+      latitude: params.location?.lat,
+      longitude: params.location?.lng,
+      location: params.location ? {
         lat: params.location.lat,
         lng: params.location.lng,
         accuracy: typeof params.location.accuracy === 'number' ? params.location.accuracy : 0,
         address: params.location.address || params.deliveryAddress
-      },
+      } : undefined,
       status: 'pending',
       agencyId: params.agencyId || 'SIEGE_CENTRAL',
       createdAt: now,

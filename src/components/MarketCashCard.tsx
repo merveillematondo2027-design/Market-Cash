@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Eye, EyeOff, Fingerprint, Copy } from 'lucide-react';
+import { Eye, EyeOff, Fingerprint, Copy, Wifi } from 'lucide-react';
 import { UserCard } from '../types';
 import toast from 'react-hot-toast';
 
@@ -104,7 +104,127 @@ export default function MarketCashCard({
     return identifier;
   };
 
+  const getExpiryDate = () => {
+    return card.validUntil || card.expiryEnd || card.expiry || '12/29';
+  };
+
+  const cardIdentifier = getCardIdentifier();
+  const networkLabel = (card.network || 'visa').toUpperCase();
+
+  useEffect(() => {
+    if (mode !== 'client') return;
+    console.log('[CARD_UI_RENDER]', {
+      cardId: cardIdentifier,
+      type: card.type || 'unknown',
+      status: card.status || 'unknown'
+    });
+  }, [cardIdentifier, card.status, card.type, mode]);
+
   const hasCustomBackground = Boolean(backgroundUrl && !imageError);
+
+  if (mode === 'client') {
+    return (
+      <div
+        className={`w-full aspect-[1.586/1] text-white rounded-[1.35rem] sm:rounded-[1.75rem] p-4 sm:p-5 shadow-[0_22px_45px_-22px_rgba(8,47,107,0.75)] relative overflow-hidden flex flex-col justify-between select-none transition-all duration-300 border border-blue-300/40 hover:-translate-y-0.5 hover:shadow-[0_28px_55px_-24px_rgba(29,78,216,0.8)] ${className}`}
+        style={{ backgroundColor: '#0b4edb' }}
+      >
+        {hasCustomBackground && (
+          <img
+            src={backgroundUrl}
+            alt="Fond de carte Market-Cash"
+            className="absolute inset-0 w-full h-full object-cover z-0 pointer-events-none"
+            onError={() => {
+              console.warn('[CARD_BACKGROUND_LOAD_FAILED] Falling back to default styling');
+              setImageError(true);
+            }}
+          />
+        )}
+
+        <div className={`absolute inset-0 z-0 pointer-events-none ${hasCustomBackground ? 'bg-gradient-to-br from-blue-950/65 via-blue-700/45 to-cyan-500/30' : 'bg-gradient-to-br from-[#125ce8] via-[#176ee8] to-[#082d78]'}`} />
+        <div className="absolute -top-20 -right-16 w-56 h-56 rounded-full bg-cyan-300/20 blur-2xl pointer-events-none" />
+        <div className="absolute -bottom-24 -left-16 w-64 h-64 rounded-full bg-blue-950/55 blur-2xl pointer-events-none" />
+        <div
+          className="absolute inset-0 opacity-[0.16] pointer-events-none"
+          style={{
+            backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(255,255,255,0.65) 1px, transparent 0)',
+            backgroundSize: '13px 13px',
+            maskImage: 'linear-gradient(115deg, transparent 4%, black 52%, transparent 96%)'
+          }}
+        />
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/80 to-transparent pointer-events-none" />
+
+        <div className="relative z-10 flex items-start justify-between">
+          <div>
+            <div className="text-sm sm:text-base font-black tracking-[0.04em] leading-none drop-shadow-sm">
+              MARKET<span className="text-amber-300">-CASH</span>
+            </div>
+            <div className="mt-1 text-[7px] sm:text-[8px] font-extrabold tracking-[0.22em] text-blue-100 uppercase">
+              Carte prépayée
+            </div>
+          </div>
+
+          {showRevealButton && onToggleReveal && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleReveal();
+              }}
+              className="p-2 bg-blue-950/45 hover:bg-blue-950/65 active:scale-95 rounded-xl border border-white/20 backdrop-blur-md transition-all cursor-pointer shadow-md"
+              title={isRevealed ? 'Masquer les informations' : 'Afficher les informations'}
+              aria-label={isRevealed ? 'Masquer les informations sensibles' : 'Afficher les informations sensibles'}
+            >
+              <span className="flex items-center gap-1">
+                {isRevealed ? <EyeOff size={15} className="text-amber-300" /> : <Eye size={15} className="text-white" />}
+                {!isRevealed && useBiometrics && <Fingerprint size={12} className="text-amber-300" />}
+              </span>
+            </button>
+          )}
+        </div>
+
+        <div className="relative z-10 flex items-center justify-between mt-2 sm:mt-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-8 sm:w-12 sm:h-9 rounded-lg bg-gradient-to-br from-amber-100 via-amber-300 to-amber-500 border border-amber-100/80 shadow-[inset_0_1px_2px_rgba(255,255,255,0.8),0_5px_12px_rgba(8,47,107,0.3)] relative overflow-hidden">
+              <div className="absolute inset-y-0 left-1/2 w-px bg-amber-700/35" />
+              <div className="absolute inset-x-0 top-1/2 h-px bg-amber-700/35" />
+              <div className="absolute top-0 bottom-0 left-2.5 sm:left-3.5 w-px bg-amber-700/25" />
+            </div>
+            <Wifi size={23} className="rotate-90 text-white/90 drop-shadow-sm" strokeWidth={2.4} aria-label="Paiement sans contact" />
+          </div>
+
+          <div className="bg-white/95 p-1 rounded-md shadow-md" title={`Identifiant ${cardIdentifier}`}>
+            <QRCodeSVG value={getQrValue()} size={28} level="M" />
+          </div>
+        </div>
+
+        <div className="relative z-10 my-auto py-1">
+          <div className="text-[1rem] sm:text-[1.2rem] md:text-[1.35rem] font-mono font-black text-white tracking-[0.12em] sm:tracking-[0.16em] whitespace-nowrap drop-shadow-[0_2px_5px_rgba(3,22,60,0.6)]">
+            {getCardNumber()}
+          </div>
+        </div>
+
+        <div className="relative z-10 grid grid-cols-[1fr_auto_auto] gap-3 items-end">
+          <div className="min-w-0">
+            <div className="text-[6px] sm:text-[7px] uppercase tracking-[0.16em] text-blue-100 font-bold">Titulaire</div>
+            <div className="text-[9px] sm:text-[11px] font-black text-white truncate mt-0.5">{getHolderName()}</div>
+            <div className="text-[6px] sm:text-[7px] text-blue-100/90 font-mono truncate mt-0.5">
+              RECHARGE {getRechargeNumber()}
+            </div>
+          </div>
+
+          <div className="text-left">
+            <div className="text-[6px] sm:text-[7px] uppercase tracking-[0.14em] text-blue-100 font-bold">Expire</div>
+            <div className="text-[9px] sm:text-[11px] font-black font-mono text-white mt-0.5">{getExpiryDate()}</div>
+            <div className="text-[6px] sm:text-[7px] text-blue-100/90 font-mono mt-0.5">CVV {getCvv()}</div>
+          </div>
+
+          <div className="text-[1.35rem] sm:text-[1.7rem] italic font-black tracking-[-0.08em] leading-none text-white drop-shadow-md">
+            {networkLabel}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div 

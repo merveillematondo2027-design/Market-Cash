@@ -32,6 +32,7 @@ import { useAuthStore } from '../../store/authStore';
 import { Notification } from '../../types';
 import LogoutModal from '../LogoutModal';
 import toast from 'react-hot-toast';
+import { MARKET_CASH_SUPPORT_URL, logWhatsAppSupportOpen } from '../../lib/whatsappSupport';
 
 export default function ClientLayout() {
   const location = useLocation();
@@ -261,7 +262,8 @@ export default function ClientLayout() {
           <div className="bg-blue-900/40 rounded-2xl p-4 border border-blue-800/50">
             <p className="text-xs text-blue-400 uppercase tracking-widest font-semibold mb-2">Assistance Directe</p>
             <a 
-              href="https://wa.me/243820743730?text=Bonjour%20AUTOMARKET%20RDC%2C%20j%27ai%20besoin%20d%27aide%20concernant%20mon%20compte%20Market-Cash." 
+              href={MARKET_CASH_SUPPORT_URL}
+              onClick={() => logWhatsAppSupportOpen('CLIENT_SIDEBAR')}
               target="_blank" 
               rel="noreferrer"
               className="flex items-center justify-center gap-2 w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-lg transition-colors shadow-sm"
