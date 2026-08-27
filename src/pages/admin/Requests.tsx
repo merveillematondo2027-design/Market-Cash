@@ -2,13 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   collection, 
   query, 
-  orderBy, 
-  getDocs, 
-  getDoc, 
   doc, 
   updateDoc, 
-  setDoc, 
-  serverTimestamp,
   onSnapshot 
 } from 'firebase/firestore';
 import { db } from '../../firebase/config';
@@ -20,8 +15,6 @@ import {
   CheckCircle, 
   XCircle, 
   X, 
-  Edit2, 
-  Save, 
   Truck, 
   CreditCard, 
   Clock, 
@@ -29,7 +22,6 @@ import {
   AlertCircle,
   Calendar,
   MapPin,
-  Sparkles,
   Phone,
   Mail,
   User as UserIcon
@@ -59,43 +51,22 @@ export default function AdminRequests() {
 
   const [loading, setLoading] = useState(true);
   
-  // Pricing Settings
-  const [pricing, setPricing] = useState<{virtualCardPrice: number | null, physicalCardPrice: number | null, currency: string}>({ virtualCardPrice: null, physicalCardPrice: null, currency: 'USD' });
-  const [isEditingPricing, setIsEditingPricing] = useState(false);
-  const [pricingForm, setPricingForm] = useState<{virtualCardPrice: number | string, physicalCardPrice: number | string}>({ virtualCardPrice: '', physicalCardPrice: '' });
-  const [savingPricing, setSavingPricing] = useState(false);
-
-  // Approval Form for Purchase Requests
-  const [cardForm, setCardForm] = useState({
-    cardNumber: '',
-    cardHolder: '',
-    expiryStart: '02/27',
-    expiryEnd: '08/27',
-    cvv: '551',
-    rechargeNumber: '',
-    network: 'visa',
-    type: 'virtual'
-  });
-  
   // Rejection Form
   const [rejectionReason, setRejectionReason] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [stockCounts, setStockCounts] = useState({ virtual: 0, physical: 0 });
 
   
   const [actionType, setActionType] = useState<'approve' | 'reject' | null>(null);
 
   useEffect(() => {
-    loadPricing();
-
     // 1. Real-time purchase requests listener
     const qPurchases = query(collection(db, 'card_purchase_requests'));
     const unsubPurchases = onSnapshot(qPurchases, (snap) => {
       const docs = snap.docs
         .map(d => ({ ...d.data(), id: d.id } as CardPurchaseRequest))
         .sort((a, b) => {
-          if (a.isUrgent && !b.isUrgent) return -1;
-          if (!a.isUrgent && b.isUrgent) return 1;
+          if ((a.urgentProcessing || a.isUrgent) && !(b.urgentProcessing || b.isUrgent)) return -1;
+          if (!(a.urgentProcessing || a.isUrgent) && (b.urgentProcessing || b.isUrgent)) return 1;
           return (b.createdAt || 0) - (a.createdAt || 0);
         });
       setRequests(docs);
@@ -126,67 +97,8 @@ export default function AdminRequests() {
     };
   }, []);
 
-  const loadPricing = async () => {
-    try {
-      const p = await cardService.getPricing(true);
-      setPricing(p);
-      setPricingForm({ 
-        virtualCardPrice: p.virtualCardPrice ?? '', 
-        physicalCardPrice: p.physicalCardPrice ?? '' 
-      });
-    } catch (error: any) {
-      console.error('[PRICING_LOAD_ERROR]', { code: error?.code, message: error?.message });
-    }
-  };
-
-  const handleSavePricing = async () => {
-    const vPrice = Number(pricingForm.virtualCardPrice);
-    const pPrice = Number(pricingForm.physicalCardPrice);
-
-    if (!user) {
-      toast.error('Non autorisé');
-      return;
-    }
-
-    if (!Number.isFinite(vPrice) || !Number.isFinite(pPrice) || vPrice <= 0 || pPrice <= 0) {
-      toast.error('Veuillez saisir un prix supérieur à 0 USD.');
-      return;
-    }
-
-    setSavingPricing(true);
-    try {
-      await setDoc(doc(db, 'app_settings', 'card_pricing'), {
-        virtualCardPrice: vPrice,
-        physicalCardPrice: pPrice,
-        currency: "USD",
-        updatedAt: serverTimestamp(),
-        updatedBy: user.uid
-      }, { merge: true });
-      
-      setPricing({ virtualCardPrice: vPrice, physicalCardPrice: pPrice, currency: "USD" });
-      setIsEditingPricing(false);
-      toast.success('Tarifs mis à jour avec succès.');
-    } catch (error: any) {
-      console.log('[PRICING_UPDATE_ERROR]', error);
-      toast.error('Erreur lors de la mise à jour des prix');
-    } finally {
-      setSavingPricing(false);
-    }
-  };
-
   const handleOpenApproveModal = (req: CardPurchaseRequest) => {
     setSelectedRequest(req);
-    // Prefill form
-    setCardForm({
-      cardNumber: '',
-      cardHolder: req.fullName || req.userName || '',
-      expiryStart: '02/27',
-      expiryEnd: '08/27',
-      cvv: '551',
-      rechargeNumber: '',
-      network: 'visa',
-      type: req.cardType || 'virtual'
-    });
     setActionType('approve');
   };
 
@@ -197,15 +109,14 @@ export default function AdminRequests() {
     
     setIsProcessing(true);
     try {
-      const type = selectedRequest.cardType || 'virtual';
-      const assignedCard = await cardService.approveRequestWithStock(selectedRequest.id, type, { uid: user.uid, email: user.email! });
+      const assignedCard = await cardService.approveRequestWithStock(selectedRequest.id, 'virtual', { uid: user.uid, email: user.email! });
       
-      toast.success(`Carte ${type} ${assignedCard.cardIdentifier} attribuée avec succès !`);
+      toast.success(`Carte Market-Cash ${assignedCard.cardIdentifier} attribuée avec succès !`);
       
       await cardService.createNotification({
         userId: selectedRequest.userId,
         title: 'Paiement vérifié & Carte Attribuée 🎉',
-        message: `Votre paiement a été vérifié. Votre carte ${type === 'physical' ? 'physique' : 'virtuelle'} vous a été attribuée (ID: ${assignedCard.cardIdentifier}).`,
+        message: `Votre paiement a été vérifié. Votre carte Market-Cash vous a été attribuée (ID: ${assignedCard.cardIdentifier}).`,
         type: 'success',
         requestId: selectedRequest.id,
         cardIdentifier: assignedCard.cardIdentifier
@@ -217,6 +128,8 @@ export default function AdminRequests() {
       console.error(error);
       if (error.message === 'STOCK_EMPTY') {
         toast.error("STOCK ÉPUISÉ : Aucune carte disponible dans le stock.");
+      } else if (error.message === 'IDENTITY_REQUIRED') {
+        toast.error("Pièce d'identité obligatoire : vérifiez le document avant d'approuver cette demande normale.");
       } else {
         toast.error("Une erreur est survenue lors de l'attribution.");
       }
@@ -298,82 +211,10 @@ export default function AdminRequests() {
     <div className="space-y-8 pb-20">
       
       {/* Tarifs Section */}
-      <div className="bg-white rounded-[2.5rem] border-4 border-slate-100/50 p-6 shadow-xl shadow-slate-200/40">
-        
-        {(stockCounts.virtual === 0 || stockCounts.physical === 0) && requests.length > 0 && (
-          <div className="mb-6 bg-red-50 border-l-4 border-red-500 p-4 rounded-r-2xl">
-            <div className="flex">
-              <div className="flex-shrink-0">
-                <AlertCircle className="h-5 w-5 text-red-500" />
-              </div>
-              <div className="ml-3">
-                <h3 className="text-sm font-bold text-red-800">🔴 STOCK ÉPUISÉ</h3>
-                <div className="mt-1 text-sm text-red-700">
-                  <p>Des demandes de cartes sont en attente, mais aucune carte n'est actuellement disponible dans le stock pour certains types. Ajoutez des cartes au stock avant de confirmer une nouvelle vente.</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h2 className="text-2xl font-black text-slate-800 tracking-tight">Configuration des Tarifs</h2>
-            <p className="text-xs text-slate-500 font-medium">Prix appliqués lors de l'achat de cartes par les clients</p>
-          </div>
-          {isEditingPricing ? (
-            <div className="flex gap-3">
-              <button onClick={() => setIsEditingPricing(false)} className="px-5 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-bold text-xs cursor-pointer">
-                Annuler
-              </button>
-              <button onClick={handleSavePricing} disabled={savingPricing} className="px-5 py-2.5 bg-blue-600 text-white rounded-xl font-black text-xs flex items-center gap-1.5 shadow-md shadow-blue-600/30 cursor-pointer">
-                <Save size={16}/> {savingPricing ? 'Enregistrement...' : 'Enregistrer'}
-              </button>
-            </div>
-          ) : (
-            <button onClick={() => setIsEditingPricing(true)} className="px-5 py-2.5 bg-blue-950 text-amber-400 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md cursor-pointer hover:bg-blue-900 transition">
-              <Edit2 size={16}/> Modifier les prix
-            </button>
-          )}
-        </div>
-
-        <div className="grid md:grid-cols-2 gap-6">
-          <div className="bg-blue-50/50 p-6 rounded-3xl border border-blue-100 flex justify-between items-center">
-            <div>
-              <span className="text-xs font-bold text-blue-900 uppercase tracking-wider block mb-1">Carte Virtuelle</span>
-              <p className="text-xs text-slate-500">Délivrance numérique instantanée</p>
-            </div>
-            {isEditingPricing ? (
-              <input 
-                type="number" 
-                value={pricingForm.virtualCardPrice ?? ''} 
-                onChange={e => setPricingForm({...pricingForm, virtualCardPrice: Number(e.target.value)})} 
-                className="w-32 px-4 py-2 bg-white border border-blue-300 rounded-xl font-black text-xl text-blue-700 outline-none text-right" 
-              />
-            ) : (
-              <div className="text-3xl font-black text-blue-700">
-                {pricing.virtualCardPrice !== null ? `${pricing.virtualCardPrice} ${pricing.currency}` : 'Non défini'}
-              </div>
-            )}
-          </div>
-
-          <div className="bg-amber-50/50 p-6 rounded-3xl border border-amber-100 flex justify-between items-center">
-            <div>
-              <span className="text-xs font-bold text-amber-900 uppercase tracking-wider block mb-1">Carte Physique</span>
-              <p className="text-xs text-slate-500">Fabrication et livraison physique</p>
-            </div>
-            {isEditingPricing ? (
-              <input 
-                type="number" 
-                value={pricingForm.physicalCardPrice ?? ''} 
-                onChange={e => setPricingForm({...pricingForm, physicalCardPrice: Number(e.target.value)})} 
-                className="w-32 px-4 py-2 bg-white border border-amber-300 rounded-xl font-black text-xl text-amber-700 outline-none text-right" 
-              />
-            ) : (
-              <div className="text-3xl font-black text-amber-700">
-                {pricing.physicalCardPrice !== null ? `${pricing.physicalCardPrice} ${pricing.currency}` : 'Non défini'}
-              </div>
-            )}
-          </div>
+      <div className="flex items-center justify-between rounded-2xl border border-blue-100 bg-blue-50 p-4">
+        <div>
+          <h2 className="font-black text-blue-950">Attribution depuis le stock unique</h2>
+          <p className="text-xs text-blue-700 mt-1">Chaque approbation attribue atomiquement une carte Market-Cash disponible. Les tarifs se configurent dans Profil.</p>
         </div>
       </div>
 
@@ -430,7 +271,7 @@ export default function AdminRequests() {
                   <tr key={req.id} className="hover:bg-slate-50/80 transition">
                     <td className="p-4 text-xs font-semibold">{new Date(req.createdAt).toLocaleDateString('fr-FR')}</td>
                     <td className="p-4">
-                      <div className="font-bold text-slate-900">{req.userName || req.fullName} {req.physicalOption === 'urgent' && <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800">⚠️ PHYSIQUE URGENT</span>}</div>
+                      <div className="font-bold text-slate-900">{req.userName || req.fullName} {(req.urgentProcessing || req.isUrgent) && <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800">⚠️ TRAITEMENT URGENT</span>}</div>
                       <div className="text-xs text-slate-500">{req.userEmail} • {req.phone || req.userPhone}</div>
                     </td>
                     <td className="p-4 font-bold text-blue-600">{req.cardName}</td>
@@ -618,6 +459,20 @@ export default function AdminRequests() {
                   <div className="text-sm text-slate-400 italic">Aucune preuve disponible</div>
                 )}
               </div>
+
+              {selectedRequest.identityRequired === true && !selectedRequest.urgentProcessing && (
+                <div>
+                  <div className="text-xs font-bold text-slate-400 uppercase mb-2">Pièce d'identité requise</div>
+                  {selectedRequest.identityProofUrl ? (
+                    <a href={selectedRequest.identityProofUrl} target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-50 text-blue-700 font-bold text-sm border border-blue-200">
+                      <Eye size={16} /> Vérifier la pièce d'identité
+                    </a>
+                  ) : (
+                    <div className="text-sm text-red-600 font-bold">Document manquant — approbation bloquée</div>
+                  )}
+                </div>
+              )}
             </div>
 
             {selectedRequest.status === 'pending' && (
@@ -650,7 +505,7 @@ export default function AdminRequests() {
               Vous êtes sur le point de valider le paiement de <strong>{selectedRequest.userName || selectedRequest.fullName}</strong>.
             </p>
             <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm font-medium">
-              Une carte <strong>{selectedRequest.cardType === 'physical' ? 'Physique' : 'Virtuelle'}</strong> sera automatiquement piochée dans le stock et attribuée à ce client.
+              Une carte Market-Cash disponible sera automatiquement réservée puis attribuée à ce client. {selectedRequest.printRequested ? "La même carte entrera ensuite dans le flux d'impression PVC." : ''}
             </div>
             
             <div className="flex gap-3 pt-4">

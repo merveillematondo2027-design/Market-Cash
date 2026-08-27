@@ -24,8 +24,7 @@ import {
   ExternalLink,
   ChevronRight,
   TrendingUp,
-  Sparkles
-, Library, Package } from 'lucide-react';
+  Library, Activity } from 'lucide-react';
 import { CardPurchaseRequest, PhysicalCardRequest } from '../../types';
 
 export default function AdminDashboard() {
@@ -40,8 +39,6 @@ export default function AdminDashboard() {
     totalCards: 0,
     availableCards: 0,
     assignedCards: 0,
-    virtualCards: 0,
-    physicalCards: 0,
     totalRequests: 0,
     pendingRequests: 0,
     approvedRequests: 0,
@@ -54,6 +51,9 @@ export default function AdminDashboard() {
   });
 
   const [pricing, setPricing] = useState<CardPricingSettings>({
+    cardPrice: null,
+    printingPrice: null,
+    urgencyFee: null,
     virtualCardPrice: null,
     physicalCardPrice: null, urgentPhysicalCardPrice: null,
     currency: 'USD'
@@ -81,15 +81,10 @@ export default function AdminDashboard() {
       const cardsSnap = await getDocs(collection(db, 'cards'));
       let available = 0;
       let assigned = 0;
-      let virtual = 0;
-      let physical = 0;
       cardsSnap.forEach(doc => {
         const c = doc.data();
         if (c.saleStatus === 'available') available++;
         else assigned++;
-
-        if (c.type === 'virtual') virtual++;
-        else physical++;
       });
 
       // 3. Purchase requests
@@ -143,8 +138,6 @@ export default function AdminDashboard() {
         totalCards: cardsSnap.size,
         availableCards: available,
         assignedCards: assigned,
-        virtualCards: virtual,
-        physicalCards: physical,
         totalRequests: requestsSnap.size,
         pendingRequests: pendingReq,
         approvedRequests: approvedReq,
@@ -172,8 +165,8 @@ export default function AdminDashboard() {
   }, []);
 
   const hasUrgentActions = stats.pendingRequests > 0 || stats.pendingDeliveries > 0;
-  const isVirtualPriceConfigured = pricing.virtualCardPrice !== null && pricing.virtualCardPrice > 0;
-  const isPhysicalPriceConfigured = pricing.physicalCardPrice !== null && pricing.physicalCardPrice > 0;
+  const isVirtualPriceConfigured = pricing.cardPrice !== null && pricing.cardPrice > 0;
+  const isPhysicalPriceConfigured = pricing.printingPrice !== null && pricing.printingPrice > 0;
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -187,7 +180,7 @@ export default function AdminDashboard() {
             <span className="text-xs text-blue-200 font-medium">Market-Cash Admin</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
-            Tableau de Bord Général
+            Accueil Administrateur
           </h1>
           <p className="text-sm text-blue-200 max-w-xl">
             Supervisez les flux, validez les paiements, gérez les cartes et coordonnez les livraisons en temps réel.
@@ -256,7 +249,7 @@ export default function AdminDashboard() {
 
       {/* SYSTEM PRICING & PAYMENT NUMBERS STATUS STRIP */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {/* Virtual Price Status */}
+        {/* Base card price status */}
         <div 
           onClick={() => navigate('/admin/profile')} 
           className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between cursor-pointer hover:border-blue-500 transition group"
@@ -266,9 +259,9 @@ export default function AdminDashboard() {
               <Smartphone size={20} />
             </div>
             <div>
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Prix Carte Virtuelle</span>
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Prix de la carte</span>
               <span className="text-sm font-black text-slate-800">
-                {isVirtualPriceConfigured ? `${pricing.virtualCardPrice} ${pricing.currency}` : 'Non configuré'}
+                {isVirtualPriceConfigured ? `${pricing.cardPrice} ${pricing.currency}` : 'Non configuré'}
               </span>
             </div>
           </div>
@@ -280,19 +273,19 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Physical Price Status */}
+        {/* Printing price status */}
         <div 
           onClick={() => navigate('/admin/profile')} 
           className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between cursor-pointer hover:border-blue-500 transition group"
         >
           <div className="flex items-center gap-3">
-            <div className={`p-2.5 rounded-xl ${isPhysicalPriceConfigured ? 'bg-purple-50 text-purple-600' : 'bg-red-50 text-red-600'}`}>
+            <div className={`p-2.5 rounded-xl ${isPhysicalPriceConfigured ? 'bg-blue-50 text-blue-600' : 'bg-red-50 text-red-600'}`}>
               <CreditCard size={20} />
             </div>
             <div>
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Prix Carte Physique</span>
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Prix de l'impression</span>
               <span className="text-sm font-black text-slate-800">
-                {isPhysicalPriceConfigured ? `${pricing.physicalCardPrice} ${pricing.currency}` : 'Non configuré'}
+                {isPhysicalPriceConfigured ? `${pricing.printingPrice} ${pricing.currency}` : 'Non configuré'}
               </span>
             </div>
           </div>
@@ -300,7 +293,7 @@ export default function AdminDashboard() {
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${isPhysicalPriceConfigured ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
               {isPhysicalPriceConfigured ? 'Configuré' : 'À définir'}
             </span>
-            <ChevronRight size={16} className="text-slate-300 group-hover:text-purple-600 transition" />
+            <ChevronRight size={16} className="text-slate-300 group-hover:text-blue-600 transition" />
           </div>
         </div>
 
@@ -649,23 +642,23 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* 8. Design de Carte PVC */}
+          {/* 8. Centre de logs */}
           <div 
-            onClick={() => navigate('/admin/settings')}
+            onClick={() => navigate('/admin/logs')}
             className="bg-white p-5 rounded-[1.8rem] border border-slate-200/90 shadow-sm hover:shadow-md hover:border-amber-500 transition cursor-pointer flex flex-col justify-between group"
           >
             <div>
               <div className="flex justify-between items-start mb-3">
                 <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold">
-                  <Sparkles size={24} />
+                  <Activity size={24} />
                 </div>
                 <span className="text-xs font-extrabold px-2.5 py-1 bg-amber-50 text-amber-700 rounded-xl border border-amber-200">
-                  Fond Graphique
+                  Diagnostic
                 </span>
               </div>
-              <h3 className="font-black text-base text-slate-800 group-hover:text-amber-600 transition">Design de Carte</h3>
+              <h3 className="font-black text-base text-slate-800 group-hover:text-amber-600 transition">Centre de logs</h3>
               <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
-                Arrière-plan graphique de la carte PVC Market-Cash personnalisable.
+                Erreurs, opérations Firebase, paiements, cartes et événements de sécurité.
               </p>
             </div>
             <div className="flex items-center gap-1 text-xs font-bold text-amber-600 mt-4 pt-3 border-t border-slate-100">

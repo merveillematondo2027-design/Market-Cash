@@ -33,9 +33,10 @@ export default function ClientCards() {
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodItem[]>([]);
   const [pricingUnavailable, setPricingUnavailable] = useState(false);
   
-  // 4-Step Purchase Flow State
-  const [purchaseStep, setPurchaseStep] = useState<1 | 2 | 3 | 4 | null>(null);
-  const [physicalOption, setPhysicalOption] = useState<'none'|'normal'|'urgent'>('none');
+  // Purchase flow: one Market-Cash card with two independent options.
+  const [purchaseStep, setPurchaseStep] = useState<1 | 2 | 3 | 4 | 5 | null>(null);
+  const [printRequested, setPrintRequested] = useState(false);
+  const [urgentProcessing, setUrgentProcessing] = useState(false);
   const [copiedNumber, setCopiedNumber] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -50,15 +51,20 @@ export default function ClientCards() {
   });
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [proofPreviewUrl, setProofPreviewUrl] = useState<string | null>(null);
+  const [identityFile, setIdentityFile] = useState<File | null>(null);
+  const [identityPreviewUrl, setIdentityPreviewUrl] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const selectedPhysicalPrice = physicalOption === 'urgent'
-    ? pricing.urgentPhysicalCardPrice
-    : physicalOption === 'normal'
-      ? pricing.physicalCardPrice
-      : 0;
-  const actualPrice = pricing.virtualCardPrice !== null && selectedPhysicalPrice !== null
-    ? pricing.virtualCardPrice + selectedPhysicalPrice
+  const physicalOption: 'none' | 'normal' | 'urgent' = urgentProcessing
+    ? 'urgent'
+    : printRequested ? 'normal' : 'none';
+  const hasRequiredPrices = pricing.cardPrice !== null
+    && (!printRequested || pricing.printingPrice !== null)
+    && (!urgentProcessing || pricing.urgencyFee !== null);
+  const actualPrice = hasRequiredPrices
+    ? (pricing.cardPrice || 0)
+      + (printRequested ? (pricing.printingPrice || 0) : 0)
+      + (urgentProcessing ? (pricing.urgencyFee || 0) : 0)
     : null;
 
   // Cards Reveal Security State
@@ -91,14 +97,17 @@ export default function ClientCards() {
     }
   }, [user]);
 
-  // Clean up object preview URL
+  // Clean up object preview URLs.
   useEffect(() => {
     return () => {
       if (proofPreviewUrl) {
         URL.revokeObjectURL(proofPreviewUrl);
       }
+      if (identityPreviewUrl) {
+        URL.revokeObjectURL(identityPreviewUrl);
+      }
     };
-  }, [proofPreviewUrl]);
+  }, [proofPreviewUrl, identityPreviewUrl]);
 
   useEffect(() => {
     if (!user) return;
@@ -159,7 +168,7 @@ export default function ClientCards() {
     // 6. Real-time listener for pricing
     const unsubscribePricing = cardService.subscribePricing((p) => {
       setPricing(p);
-      setPricingUnavailable(p.virtualCardPrice === null && p.physicalCardPrice === null);
+      setPricingUnavailable(p.cardPrice === null);
     });
 
     return () => {
@@ -461,16 +470,29 @@ export default function ClientCards() {
     setProofPreviewUrl(preview);
   };
 
+  const handleIdentityFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type.toLowerCase())) {
+      toast.error("Pièce d'identité refusée : utilisez une image JPEG/JPG, PNG ou WebP valide.");
+      e.target.value = '';
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      toast.error("La pièce d'identité dépasse la taille maximale de 5 Mo.");
+      e.target.value = '';
+      return;
+    }
+    if (identityPreviewUrl) URL.revokeObjectURL(identityPreviewUrl);
+    setIdentityFile(file);
+    setIdentityPreviewUrl(URL.createObjectURL(file));
+  };
+
   const handlePurchaseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!user || !auth.currentUser) {
       toast.error('Session expirée ou utilisateur non authentifié. Veuillez vous reconnecter.');
-      return;
-    }
-
-    if (!physicalOption) {
-      toast.error('Veuillez sélectionner un type de carte.');
       return;
     }
 
@@ -500,6 +522,11 @@ export default function ClientCards() {
 
     
 
+    if (!urgentProcessing && !identityFile) {
+      toast.error("Une pièce d'identité est obligatoire pour le traitement normal.");
+      return;
+    }
+
     if (!proofFile) {
       toast.error('La preuve de paiement (capture d\'écran) est obligatoire.');
       return;
@@ -507,12 +534,23 @@ export default function ClientCards() {
 
     setIsSubmitting(true);
     let uploadedDownloadUrl: string | null = null;
+    let identityDownloadUrl: string | null = null;
     const currentUid = auth.currentUser.uid;
     const timestamp = Date.now();
     const cleanFileName = proofFile.name.replace(/[^a-zA-Z0-9.-]/g, '_');
     const storagePath = `payment-proofs/${currentUid}/${timestamp}_${cleanFileName}`;
 
     try {
+      if (!urgentProcessing && identityFile) {
+        const cleanIdentityName = identityFile.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const identityRef = ref(storage, `identity-proofs/${currentUid}/${timestamp}_${cleanIdentityName}`);
+        await uploadBytes(identityRef, identityFile, {
+          contentType: identityFile.type,
+          customMetadata: { userId: currentUid, uploadedAt: new Date().toISOString() }
+        });
+        identityDownloadUrl = await getDownloadURL(identityRef);
+      }
+
       const proofRef = ref(storage, storagePath);
       const metadata = {
         contentType: proofFile.type || 'image/jpeg',
@@ -538,7 +576,8 @@ export default function ClientCards() {
       }
 
       const requestId = doc(collection(db, 'card_purchase_requests')).id;
-      const cardTitle = 'Carte Virtuelle Market-Cash' + (physicalOption === 'urgent' ? ' + Impression Urgente' : (physicalOption === 'normal' ? ' + Impression Normale' : ''));
+      const optionLabels = [printRequested ? 'Impression physique' : '', urgentProcessing ? 'Traitement urgent' : ''].filter(Boolean);
+      const cardTitle = `Carte Market-Cash${optionLabels.length ? ` + ${optionLabels.join(' + ')}` : ''}`;
       const cleanNote = purchaseForm.note.trim();
 
       const rawRequestPayload: Partial<CardPurchaseRequest> = {
@@ -551,6 +590,18 @@ export default function ClientCards() {
         userPhone: phone,
         cardType: 'virtual',
         physicalOption: physicalOption,
+        printRequested,
+        urgentProcessing,
+        isUrgent: urgentProcessing,
+        identityRequired: !urgentProcessing,
+        identityProofUrl: identityDownloadUrl || undefined,
+        identityProofFileName: identityFile?.name || undefined,
+        identityVerified: false,
+        pricingBreakdown: {
+          cardPrice: pricing.cardPrice || 0,
+          printingPrice: printRequested ? (pricing.printingPrice || 0) : 0,
+          urgencyFee: urgentProcessing ? (pricing.urgencyFee || 0) : 0
+        },
         cardName: cardTitle,
         amount: actualPrice,
         currency: pricing.currency || 'USD',
@@ -573,7 +624,9 @@ export default function ClientCards() {
         requestId,
         userId: currentUid,
         cardType: 'virtual',
-        physicalOption: physicalOption,
+        printRequested,
+        urgentProcessing,
+        identityRequired: !urgentProcessing,
         hasNote: Boolean(cleanNote),
         hasAgencyId: Boolean(user.agencyId),
         hasCardIdentifier: false
@@ -584,13 +637,18 @@ export default function ClientCards() {
       await setDoc(doc(db, 'card_purchase_requests', requestId), requestPayload);
 
       toast.success('Demande enregistrée avec succès !');
-      setPurchaseStep(4);
+      setPurchaseStep(5);
       setProofFile(null);
       if (proofPreviewUrl) {
         URL.revokeObjectURL(proofPreviewUrl);
         setProofPreviewUrl(null);
       }
       setPurchaseForm(prev => ({ ...prev, reference: '', note: '' }));
+      setIdentityFile(null);
+      if (identityPreviewUrl) {
+        URL.revokeObjectURL(identityPreviewUrl);
+        setIdentityPreviewUrl(null);
+      }
 
     } catch (globalError: any) {
       console.error('[PURCHASE_SUBMIT_UNEXPECTED_ERROR]', globalError);
@@ -633,7 +691,8 @@ export default function ClientCards() {
             {myCards.length < 4 && myCards.length > 0 && (
               <button 
                 onClick={() => {
-                  setPhysicalOption('none');
+                  setPrintRequested(false);
+                  setUrgentProcessing(false);
                   setPurchaseStep(1);
                 }}
                 className="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-xs py-2 px-3 sm:px-4 rounded-xl transition-all shadow-sm flex items-center gap-1 cursor-pointer"
@@ -656,7 +715,8 @@ export default function ClientCards() {
             </p>
             <button 
               onClick={() => {
-                setPhysicalOption('none');
+                setPrintRequested(false);
+                setUrgentProcessing(false);
                 setPurchaseStep(1);
               }}
               className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 active:scale-98 text-white font-black py-3.5 px-8 rounded-2xl transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 text-base cursor-pointer"
@@ -1068,424 +1128,161 @@ export default function ClientCards() {
 
       {/* PURCHASE MODAL */}
       {purchaseStep !== null && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
-          <div className="bg-white rounded-[2.5rem] w-full max-w-2xl overflow-hidden flex flex-col max-h-[92vh] shadow-2xl animate-in zoom-in-95 duration-200">
-            {/* Modal Header */}
-            <div className="flex justify-between items-center p-6 border-b border-slate-100 bg-slate-50">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center shadow-inner">
-                  <CreditCard size={24} />
-                </div>
-                <div>
-                  <h3 className="font-black text-xl text-slate-900 tracking-tight">Commander une carte</h3>
-                  <p className="text-xs text-slate-500 font-medium">Processus d'achat sécurisé</p>
-                </div>
+        <div className="fixed inset-0 bg-slate-950/65 backdrop-blur-sm z-[110] flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-3xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[92vh] shadow-2xl">
+            <div className="flex justify-between items-center p-5 border-b border-slate-100 bg-slate-50">
+              <div>
+                <h3 className="font-black text-xl text-blue-950">Commander une carte Market-Cash</h3>
+                <p className="text-xs text-slate-500">Une carte, avec impression et urgence en options</p>
               </div>
-              <button 
-                onClick={() => {
-                  setPurchaseStep(null);
-                  setPhysicalOption('none');
-                  if (proofPreviewUrl) {
-                    URL.revokeObjectURL(proofPreviewUrl);
-                    setProofPreviewUrl(null);
-                  }
-                  setProofFile(null);
-                }} 
-                className="p-2.5 text-slate-400 hover:text-slate-800 hover:bg-slate-200/60 rounded-full transition-colors cursor-pointer"
-              >
-                <X size={20} />
-              </button>
+              <button type="button" aria-label="Fermer" onClick={() => {
+                setPurchaseStep(null);
+                setPrintRequested(false);
+                setUrgentProcessing(false);
+              }} className="p-2 text-slate-500 hover:bg-slate-200 rounded-full"><X size={20} /></button>
             </div>
 
-            {/* 4-Step Progress Bar */}
-            <div className="grid grid-cols-4 gap-2 px-6 pt-6 pb-2">
-              {[
-                { num: 1, label: '1. Choix' },
-                { num: 2, label: '2. Paiement' },
-                { num: 3, label: '3. Preuve' },
-                { num: 4, label: '4. Validation' }
-              ].map(step => (
-                <div key={step.num} className="flex flex-col gap-2">
-                  <div className={`h-1.5 rounded-full transition-all ${
-                    purchaseStep >= step.num ? 'bg-blue-600' : 'bg-slate-200'
-                  }`} />
-                  <span className={`text-[9px] sm:text-[10px] font-black uppercase tracking-wider ${
-                    purchaseStep >= step.num ? 'text-blue-600' : 'text-slate-400'
-                  }`}>
-                    {step.label}
-                  </span>
+            <div className="grid grid-cols-5 gap-2 px-5 pt-5">
+              {['Options', 'Identité', 'Paiement', 'Preuve', 'Confirmation'].map((label, index) => (
+                <div key={label}>
+                  <div className={`h-1.5 rounded-full ${purchaseStep >= index + 1 ? 'bg-blue-600' : 'bg-slate-200'}`} />
+                  <span className="hidden sm:block mt-1 text-[9px] font-bold text-slate-500">{label}</span>
                 </div>
               ))}
             </div>
 
-            {/* Modal Content */}
-            <div className="p-6 overflow-y-auto">
-              
-              
-              {/* STEP 1: CHOICE */}
+            <div className="p-5 sm:p-6 overflow-y-auto">
               {purchaseStep === 1 && (
                 <div className="space-y-4">
-                  <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 mb-4">
-                    <h4 className="font-black text-blue-900 text-sm mb-1 flex items-center gap-2">
-                       <Smartphone size={16} />
-                       Carte Virtuelle Incluse
-                    </h4>
-                    <p className="text-xs text-blue-800/80 font-medium">
-                      Votre carte virtuelle sera disponible instantanément après validation de votre paiement.
-                      Prix de base : <strong>{pricing.virtualCardPrice} {pricing.currency}</strong>
+                  <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                    <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Produit principal</p>
+                    <div className="flex justify-between mt-1">
+                      <span className="font-black text-blue-950">Carte Market-Cash</span>
+                      <span className="font-black text-blue-700">{pricing.cardPrice ?? '—'} {pricing.currency}</span>
+                    </div>
+                  </div>
+
+                  <button type="button" disabled={pricing.printingPrice === null}
+                    onClick={() => setPrintRequested(value => !value)}
+                    className={`w-full text-left p-4 rounded-2xl border-2 transition ${printRequested ? 'border-amber-500 bg-amber-50' : 'border-slate-200'} disabled:opacity-50`}>
+                    <div className="flex justify-between gap-3">
+                      <div><p className="font-black text-slate-900">Impression physique</p>
+                        <p className="text-xs text-slate-500 mt-1">La même carte sera préparée au format PVC, sans créer une seconde carte.</p></div>
+                      <span className="font-black text-amber-600">+{pricing.printingPrice ?? '—'} {pricing.currency}</span>
+                    </div>
+                  </button>
+
+                  <button type="button" disabled={pricing.urgencyFee === null}
+                    onClick={() => setUrgentProcessing(value => !value)}
+                    className={`w-full text-left p-4 rounded-2xl border-2 transition ${urgentProcessing ? 'border-red-500 bg-red-50' : 'border-slate-200'} disabled:opacity-50`}>
+                    <div className="flex justify-between gap-3">
+                      <div><p className="font-black text-slate-900">Traitement urgent</p>
+                        <p className="text-xs text-slate-500 mt-1">Après validation du paiement, une carte disponible peut être attribuée en quelques minutes.</p></div>
+                      <span className="font-black text-red-600">+{pricing.urgencyFee ?? '—'} {pricing.currency}</span>
+                    </div>
+                  </button>
+
+                  <div className="rounded-2xl bg-slate-950 text-white p-4 space-y-2 text-sm">
+                    <div className="flex justify-between"><span>Carte Market-Cash</span><b>{pricing.cardPrice ?? 0} {pricing.currency}</b></div>
+                    {printRequested && <div className="flex justify-between"><span>Impression physique</span><b>+{pricing.printingPrice ?? 0} {pricing.currency}</b></div>}
+                    {urgentProcessing && <div className="flex justify-between"><span>Traitement urgent</span><b>+{pricing.urgencyFee ?? 0} {pricing.currency}</b></div>}
+                    <div className="flex justify-between border-t border-white/20 pt-2 text-base"><strong>TOTAL</strong><strong className="text-amber-400">{actualPrice ?? '—'} {pricing.currency}</strong></div>
+                  </div>
+                  <button type="button" disabled={actualPrice === null} onClick={() => setPurchaseStep(2)}
+                    className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black disabled:opacity-50">Continuer</button>
+                </div>
+              )}
+
+              {purchaseStep === 2 && (
+                <div className="space-y-4">
+                  <div className={`p-4 rounded-2xl border ${urgentProcessing ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-200'}`}>
+                    <p className="text-sm font-bold text-slate-800">
+                      {urgentProcessing
+                        ? "Traitement urgent : la pièce d'identité n'est pas obligatoire dans ce parcours."
+                        : "Le traitement normal peut prendre jusqu'à 48 heures après validation du paiement et des informations."}
                     </p>
                   </div>
-                  
-                  <h3 className="font-black text-lg text-slate-800">Souhaitez-vous également une carte physique ?</h3>
-                  
-                  <div className="grid gap-3">
-                    {/* Option None */}
-                    <div 
-                      onClick={() => setPhysicalOption('none')}
-                      className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex flex-col gap-2 ${
-                        physicalOption === 'none' 
-                          ? 'border-blue-500 bg-blue-50/50 shadow-md ring-4 ring-blue-500/10' 
-                          : 'border-slate-200 hover:border-blue-300 hover:bg-slate-50'
-                      }`}
-                    >
-                      <div className="flex justify-between items-center">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                            physicalOption === 'none' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'
-                          }`}>
-                            {physicalOption === 'none' && <Check size={14} />}
-                          </div>
-                          <div>
-                            <h4 className="font-bold text-slate-900 text-sm">Non, carte virtuelle uniquement</h4>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Option Normal */}
-                    <div 
-                      onClick={() => setPhysicalOption('normal')}
-                      className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex flex-col gap-2 ${
-                        physicalOption === 'normal' 
-                          ? 'border-amber-500 bg-amber-50/50 shadow-md ring-4 ring-amber-500/10' 
-                          : 'border-slate-200 hover:border-amber-300 hover:bg-slate-50'
-                      }`}
-                    >
-                      <div className="flex justify-between items-center">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                            physicalOption === 'normal' ? 'bg-amber-500 text-white' : 'bg-amber-100 text-amber-600'
-                          }`}>
-                            {physicalOption === 'normal' && <Check size={14} />}
-                          </div>
-                          <div>
-                            <h4 className="font-bold text-slate-900 text-sm">Oui, commande physique normale</h4>
-                            <p className="text-[10px] text-slate-500 mt-0.5">Impression à partir de 24 heures.</p>
-                          </div>
-                        </div>
-                        <div className="font-black text-amber-600">
-                          +{pricing.physicalCardPrice} {pricing.currency}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Option Urgent */}
-                    <div 
-                      onClick={() => setPhysicalOption('urgent')}
-                      className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex flex-col gap-2 ${
-                        physicalOption === 'urgent' 
-                          ? 'border-red-500 bg-red-50/50 shadow-md ring-4 ring-red-500/10' 
-                          : 'border-slate-200 hover:border-red-300 hover:bg-slate-50'
-                      }`}
-                    >
-                      <div className="flex justify-between items-center">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                            physicalOption === 'urgent' ? 'bg-red-500 text-white' : 'bg-red-100 text-red-600'
-                          }`}>
-                            {physicalOption === 'urgent' && <Check size={14} />}
-                          </div>
-                          <div>
-                            <h4 className="font-bold text-slate-900 text-sm">Oui, impression urgente <span className="bg-red-100 text-red-600 text-[9px] px-1.5 py-0.5 rounded-full ml-1 uppercase">Prioritaire</span></h4>
-                            <p className="text-[10px] text-slate-500 mt-0.5">Préparation immédiate après validation.</p>
-                          </div>
-                        </div>
-                        <div className="font-black text-red-600">
-                          +{pricing.urgentPhysicalCardPrice || 0} {pricing.currency}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="pt-4">
-                    <button
-                      type="button"
-                      onClick={() => setPurchaseStep(2)}
-                      className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-black text-sm tracking-wide transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <span>Continuer vers le paiement</span>
-                      <ArrowRight size={16} />
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* STEP 2: PAYMENT METHODS DISPLAY */}
-              {purchaseStep === 2 && (
-                <div className="space-y-5">
-                  <h3 className="font-black text-xl text-blue-950">Comment effectuer votre paiement ?</h3>
-                  
-                  {/* Amount Summary */}
-                  <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-5 rounded-2xl flex justify-between items-center shadow-md">
-                    <div>
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-blue-200 block">
-                        Montant total à régler
-                      </span>
-                      <span className="text-sm font-semibold text-blue-100">
-                        {'Carte Virtuelle Market-Cash' + (physicalOption === 'urgent' ? ' + Impression Urgente' : (physicalOption === 'normal' ? ' + Impression Normale' : ''))}
-                      </span>
-                    </div>
-                    <span className="text-2xl sm:text-3xl font-black text-emerald-400">
-                      {`${actualPrice ?? 0} ${pricing.currency}`}
-                    </span>
-                  </div>
-
-                  {/* Payment Accounts List */}
-                  <div className="space-y-4">
-                    <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100">
-                       <h4 className="font-black text-blue-900 text-sm mb-2 flex items-center gap-2">
-                         <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">1</span>
-                         Envoyer le paiement
-                       </h4>
-                       <p className="text-xs text-blue-800/80 mb-3 font-medium">
-                         Veuillez envoyer le montant au numéro indiqué ci-dessous.
-                       </p>
-                       
-                      {paymentMethods.length === 0 ? (
-                        <div className="p-4 bg-white border border-slate-200 rounded-xl text-center text-xs text-slate-500 font-medium">
-                          Aucun numéro de paiement n'est configuré.
-                        </div>
-                      ) : (
-                        <div className="grid gap-3">
-                          {paymentMethods.map((pm) => (
-                            <div 
-                              key={pm.id}
-                              className="bg-white border border-slate-200 p-4 rounded-xl flex flex-col justify-between gap-1 shadow-sm"
-                            >
-                              <div className="text-xs font-bold text-slate-500">{pm.network}</div>
-                              <div className="text-lg font-black text-blue-950 tracking-wider">{pm.number}</div>
-                              <div className="text-xs font-bold text-slate-700">Bénéficiaire : {pm.beneficiary}</div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    
-                    <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-100">
-                       <h4 className="font-black text-amber-900 text-sm mb-2 flex items-center gap-2">
-                         <span className="bg-amber-500 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">2</span>
-                         Préparez votre preuve
-                       </h4>
-                       <p className="text-xs text-amber-800/80 font-medium">
-                         Après avoir effectué le paiement, préparez une capture d'écran claire comme preuve de paiement pour la prochaine étape.
-                       </p>
-                    </div>
-                  </div>
-
-                  {/* Navigation Buttons */}
-                  <div className="flex gap-3 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setPurchaseStep(1)}
-                      className="px-5 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl text-xs transition cursor-pointer"
-                    >
-                      Retour
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPurchaseStep(3)}
-                      className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-3.5 rounded-2xl font-black text-sm tracking-wide transition shadow-md flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <span>J'ai effectué le paiement</span>
-                      <ArrowRight size={16} />
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* STEP 3: CONFIRMATION & PROOF UPLOAD */}
-              {purchaseStep === 3 && (
-                <form onSubmit={handlePurchaseSubmit} className="space-y-4">
                   <div className="grid sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                        Nom de la personne ayant effectué le paiement <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={purchaseForm.name}
-                        onChange={e => setPurchaseForm({...purchaseForm, name: e.target.value})}
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none transition-all font-semibold text-slate-800 text-sm"
-                        placeholder="Ex: Jean Dupont"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                        Numéro ayant effectué le paiement <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="tel"
-                        value={purchaseForm.phone}
-                        onChange={e => setPurchaseForm({...purchaseForm, phone: e.target.value})}
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none transition-all font-semibold text-slate-800 text-sm"
-                        placeholder="Ex: 081 000 0000"
-                        required
-                      />
-                    </div>
+                    <div><label className="text-xs font-bold text-slate-700">Nom complet *</label>
+                      <input value={purchaseForm.name} onChange={e => setPurchaseForm({...purchaseForm, name: e.target.value})}
+                        className="mt-1 w-full px-4 py-3 border rounded-xl" required /></div>
+                    <div><label className="text-xs font-bold text-slate-700">Téléphone *</label>
+                      <input type="tel" value={purchaseForm.phone} onChange={e => setPurchaseForm({...purchaseForm, phone: e.target.value})}
+                        className="mt-1 w-full px-4 py-3 border rounded-xl" required /></div>
                   </div>
-
-                  
-                  <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 flex items-start gap-3">
-                    <AlertTriangle className="text-amber-500 shrink-0 mt-0.5" size={18} />
-                    <div>
-                      <h4 className="font-bold text-amber-900 text-sm mb-1">Capture de paiement requise</h4>
-                      <p className="text-xs text-amber-800/80">
-                        ⚠️ Veuillez obligatoirement joindre une capture claire de votre paiement pour que l'administrateur puisse le valider.
-                      </p>
+                  {!urgentProcessing && (
+                    <div className="p-4 rounded-2xl border-2 border-dashed border-blue-200 bg-blue-50/40">
+                      <label className="block font-black text-blue-950">Pièce d'identité obligatoire *</label>
+                      <p className="text-xs text-slate-500 mt-1">JPEG/JPG, PNG ou WebP — 5 Mo maximum.</p>
+                      <input className="mt-3 block w-full text-sm" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                        onChange={handleIdentityFileChange} />
+                      {identityPreviewUrl && <img src={identityPreviewUrl} alt="Aperçu de la pièce d'identité" className="mt-3 h-32 w-full object-contain rounded-xl bg-white" />}
                     </div>
+                  )}
+                  <div className="flex gap-3">
+                    <button type="button" onClick={() => setPurchaseStep(1)} className="px-5 py-3 bg-slate-100 rounded-xl font-bold">Retour</button>
+                    <button type="button" disabled={!purchaseForm.name.trim() || !purchaseForm.phone.trim() || (!urgentProcessing && !identityFile)}
+                      onClick={() => setPurchaseStep(3)} className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-black disabled:opacity-50">Continuer vers le paiement</button>
                   </div>
+                </div>
+              )}
 
-
-                  {/* UPLOAD PROOF (Super Visible) */}
-                  <div className="mt-4 bg-indigo-50/40 p-4 sm:p-5 rounded-3xl border-2 border-indigo-100 border-dashed">
-                    <label className="block text-center mb-3">
-                      <span className="text-sm sm:text-base font-black text-indigo-900 flex items-center justify-center gap-2">
-                        📸 AJOUTEZ VOTRE PREUVE DE PAIEMENT <span className="text-red-500">*</span>
-                      </span>
-                      <span className="text-xs text-indigo-700 font-medium block mt-1">
-                        Formats acceptés : JPG, PNG (Max 5Mo)
-                      </span>
-                    </label>
-
-                    {proofPreviewUrl ? (
-                      <div className="relative w-full aspect-[4/3] bg-black/5 rounded-2xl overflow-hidden group">
-                        <img 
-                          src={proofPreviewUrl} 
-                          alt="Preuve" 
-                          className="w-full h-full object-contain"
-                        />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              URL.revokeObjectURL(proofPreviewUrl);
-                              setProofPreviewUrl(null);
-                              setProofFile(null);
-                            }}
-                            className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer shadow-lg transform hover:scale-105 transition"
-                          >
-                            <Trash2 size={16} /> Supprimer l'image
-                          </button>
+              {purchaseStep === 3 && (
+                <div className="space-y-5">
+                  <div className="flex justify-between items-center p-4 rounded-2xl bg-blue-950 text-white">
+                    <span className="font-bold">Montant à régler</span><strong className="text-xl text-amber-400">{actualPrice} {pricing.currency}</strong>
+                  </div>
+                  <div>
+                    <h4 className="font-black text-slate-900 mb-3">Moyens de paiement disponibles</h4>
+                    {paymentMethods.length === 0 ? <p className="p-4 bg-red-50 text-red-700 rounded-xl text-sm">Aucun moyen de paiement actif.</p> :
+                      <div className="grid gap-3">{paymentMethods.map(method => (
+                        <div key={method.id} className="p-4 rounded-xl border bg-slate-50">
+                          <p className="text-xs font-bold text-slate-500">{method.network}</p>
+                          <p className="text-lg font-black text-blue-950">{method.number}</p>
+                          <p className="text-xs text-slate-600">Bénéficiaire : {method.beneficiary}</p>
                         </div>
-                      </div>
-                    ) : (
-                      <div 
-                        onClick={() => document.getElementById('proof-upload')?.click()}
-                        className="w-full aspect-[21/9] sm:aspect-[4/1] bg-white border-2 border-indigo-200 border-dashed rounded-2xl flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/50 transition group shadow-sm"
-                      >
-                        <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
-                          <UploadCloud size={24} />
-                        </div>
-                        <span className="text-sm font-bold text-indigo-900">Cliquez pour importer la capture</span>
-                      </div>
-                    )}
-                    <input 
-                      id="proof-upload"
-                      type="file" 
-                      accept="image/*" 
-                      className="hidden" 
-                      onChange={handleFileChange}
-                    />
+                      ))}</div>}
                   </div>
-
-                  <div className="pt-2">
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                      Note supplémentaire (Optionnel)
-                    </label>
-                    <textarea
-                      value={purchaseForm.note}
-                      onChange={e => setPurchaseForm({...purchaseForm, note: e.target.value})}
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none transition-all font-semibold text-slate-800 text-sm resize-none"
-                      placeholder="Une remarque à l'attention de l'administrateur ?"
-                      rows={2}
-                    />
+                  <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 p-3 rounded-xl">Effectuez le paiement puis préparez une capture claire comme preuve.</p>
+                  <div className="flex gap-3">
+                    <button type="button" onClick={() => setPurchaseStep(2)} className="px-5 py-3 bg-slate-100 rounded-xl font-bold">Retour</button>
+                    <button type="button" disabled={paymentMethods.length === 0} onClick={() => setPurchaseStep(4)}
+                      className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-black disabled:opacity-50">J'ai effectué le paiement</button>
                   </div>
+                </div>
+              )}
 
-                  {/* Form Action Buttons */}
-                  <div className="flex gap-3 pt-3">
-                    <button
-                      type="button"
-                      disabled={isSubmitting}
-                      onClick={() => setPurchaseStep(2)}
-                      className="px-5 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl text-xs transition cursor-pointer disabled:opacity-50"
-                    >
-                      Retour
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isSubmitting || !proofFile}
-                      className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-black text-sm tracking-wide transition shadow-lg flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                    >
-                      {isSubmitting ? 'Envoi en cours...' : 'CONFIRMER ET ENVOYER MA DEMANDE'}
-                    </button>
+              {purchaseStep === 4 && (
+                <form onSubmit={handlePurchaseSubmit} className="space-y-4">
+                  <div className="p-4 rounded-2xl border-2 border-dashed border-blue-200 bg-blue-50/40">
+                    <label className="block font-black text-blue-950">Preuve de paiement obligatoire *</label>
+                    <p className="text-xs text-slate-500 mt-1">JPEG/JPG, PNG ou WebP — 5 Mo maximum.</p>
+                    <input className="mt-3 block w-full text-sm" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={handleFileChange} />
+                    {proofPreviewUrl && <img src={proofPreviewUrl} alt="Aperçu de la preuve de paiement" className="mt-3 h-40 w-full object-contain rounded-xl bg-white" />}
+                  </div>
+                  <div><label className="text-xs font-bold text-slate-700">Note supplémentaire (facultatif)</label>
+                    <textarea maxLength={1000} rows={3} value={purchaseForm.note} onChange={e => setPurchaseForm({...purchaseForm, note: e.target.value})}
+                      className="mt-1 w-full px-4 py-3 border rounded-xl resize-none" /></div>
+                  <div className="flex gap-3">
+                    <button type="button" onClick={() => setPurchaseStep(3)} disabled={isSubmitting} className="px-5 py-3 bg-slate-100 rounded-xl font-bold">Retour</button>
+                    <button type="submit" disabled={isSubmitting || !proofFile}
+                      className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-black disabled:opacity-50">{isSubmitting ? 'Envoi…' : 'Confirmer la demande'}</button>
                   </div>
                 </form>
               )}
 
-{purchaseStep === 4 && (
-                <div className="text-center py-6 px-4 space-y-5 animate-in zoom-in-95 duration-200">
-                  <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-inner border-2 border-emerald-100">
-                    <CheckCircle2 size={42} className="stroke-[2.5]" />
-                  </div>
-
-                  <div className="space-y-2 max-w-md mx-auto">
-                    <h4 className="text-2xl font-black text-slate-900 tracking-tight">
-                      Demande enregistrée avec succès !
-                    </h4>
-                    <p className="text-slate-600 text-sm font-medium leading-relaxed">
-                      Votre demande pour une <strong className="text-slate-800">{physicalOption === 'none' ? 'Carte Virtuelle' : 'Carte Physique'} Market-Cash</strong> est actuellement en cours de traitement et de vérification par un Administrateur Général.
-                    </p>
-                  </div>
-
-                  <div className="bg-slate-50 border border-slate-200 p-4 rounded-2xl max-w-md mx-auto text-left space-y-2 text-xs text-slate-600">
-                    <div className="flex items-center gap-2 font-bold text-slate-800">
-                      <Clock size={15} className="text-blue-600" />
-                      <span>Prochaines étapes :</span>
-                    </div>
-                    <ul className="list-disc list-inside space-y-1 text-slate-500 pl-1">
-                      <li>Validation du paiement par l'administration</li>
-                      <li>Attribution et activation automatique de votre carte</li>
-                      <li>Notification en direct dans votre espace Market-Cash</li>
-                    </ul>
-                  </div>
-
-                  <div className="pt-4 max-w-sm mx-auto">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPurchaseStep(null);
-                        setPhysicalOption('none');
-                      }}
-                      className="w-full bg-blue-950 hover:bg-blue-900 text-white font-black py-4 rounded-2xl text-sm transition shadow-md cursor-pointer"
-                    >
-                      Fermer et consulter mes demandes
-                    </button>
-                  </div>
+              {purchaseStep === 5 && (
+                <div className="text-center py-6 space-y-5">
+                  <CheckCircle2 size={54} className="mx-auto text-emerald-600" />
+                  <div><h4 className="text-2xl font-black text-slate-900">Demande enregistrée</h4>
+                    <p className="mt-2 text-sm text-slate-600">Votre paiement sera vérifié avant toute attribution de carte.</p></div>
+                  <button type="button" onClick={() => {
+                    setPurchaseStep(null);
+                    setPrintRequested(false);
+                    setUrgentProcessing(false);
+                  }} className="w-full py-4 bg-blue-950 text-white rounded-2xl font-black">Consulter mes demandes</button>
                 </div>
               )}
-
             </div>
           </div>
         </div>

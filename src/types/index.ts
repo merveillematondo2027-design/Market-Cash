@@ -54,6 +54,17 @@ export interface CardPurchaseRequest {
   cardType?: 'virtual' | 'physical';
   isUrgent?: boolean; // CardPurchaseRequest
   physicalOption?: 'none' | 'normal' | 'urgent';
+  printRequested?: boolean;
+  urgentProcessing?: boolean;
+  identityRequired?: boolean;
+  identityProofUrl?: string;
+  identityProofFileName?: string;
+  identityVerified?: boolean;
+  pricingBreakdown?: {
+    cardPrice: number;
+    printingPrice: number;
+    urgencyFee: number;
+  };
   cardName?: string;
   amount: number;
   price?: number; // Compatibility
@@ -222,6 +233,7 @@ export interface HelpArticle {
 
 export interface CardDesignSettings {
   backgroundUrl: string;
+  designJson?: string;
   updatedAt: number;
   updatedBy?: string;
   version: number;

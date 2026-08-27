@@ -18,6 +18,10 @@ import { UserCard, PhysicalCardRequest, DeliveryStatus, User, CardDesignSettings
 import { generateAndUploadPvcCard } from '../lib/pvcCardGenerator';
 
 export interface CardPricingSettings {
+  cardPrice: number | null;
+  printingPrice: number | null;
+  urgencyFee: number | null;
+  /** Champs historiques conservés en lecture pour les anciens composants/documents. */
   virtualCardPrice: number | null;
   physicalCardPrice: number | null;
   urgentPhysicalCardPrice: number | null;
@@ -26,6 +30,9 @@ export interface CardPricingSettings {
 }
 
 export const DEFAULT_CARD_PRICING: CardPricingSettings = {
+  cardPrice: null,
+  printingPrice: null,
+  urgencyFee: null,
   virtualCardPrice: null,
   physicalCardPrice: null,
   urgentPhysicalCardPrice: null,
@@ -157,6 +164,36 @@ export const INITIAL_FAQ_ARTICLES: Omit<HelpArticle, 'id' | 'createdAt' | 'updat
 let inFlightPricingPromise: Promise<CardPricingSettings> | null = null;
 let cachedPricingData: CardPricingSettings | null = null;
 
+const validPrice = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+
+const normalizePricing = (data?: Record<string, unknown>): CardPricingSettings => {
+  const resolvePrice = (currentKey: string, legacyKey: string) => data && Object.prototype.hasOwnProperty.call(data, currentKey)
+    ? validPrice(data[currentKey])
+    : validPrice(data?.[legacyKey]);
+  const cardPrice = resolvePrice('cardPrice', 'virtualCardPrice');
+  const printingPrice = resolvePrice('printingPrice', 'physicalCardPrice');
+  const urgencyFee = resolvePrice('urgencyFee', 'urgentPhysicalCardPrice');
+
+  return {
+    cardPrice,
+    printingPrice,
+    urgencyFee,
+    virtualCardPrice: cardPrice,
+    physicalCardPrice: printingPrice,
+    urgentPhysicalCardPrice: urgencyFee,
+    currency: typeof data?.currency === 'string' && data.currency ? data.currency : 'USD',
+    isFallback: false
+  };
+};
+
+const DEFAULT_CONFIGURED_PRICING = normalizePricing({
+  cardPrice: 10,
+  printingPrice: 15,
+  urgencyFee: 15,
+  currency: 'USD'
+});
+
 /**
  * Strips all undefined values recursively to ensure Firestore compatibility.
  */
@@ -193,36 +230,21 @@ export const cardService = {
         const snap = await getDoc(docRef);
 
         if (snap.exists()) {
-          const data = snap.data();
-          const vPrice = (typeof data.virtualCardPrice === 'number' && Number.isFinite(data.virtualCardPrice) && data.virtualCardPrice > 0) ? data.virtualCardPrice : null;
-          const pPrice = (typeof data.physicalCardPrice === 'number' && Number.isFinite(data.physicalCardPrice) && data.physicalCardPrice > 0) ? data.physicalCardPrice : null;
-          const urgentPrice = (typeof data.urgentPhysicalCardPrice === 'number' && Number.isFinite(data.urgentPhysicalCardPrice) && data.urgentPhysicalCardPrice > 0) ? data.urgentPhysicalCardPrice : null;
-          
-          const result: CardPricingSettings = {
-            virtualCardPrice: vPrice,
-            physicalCardPrice: pPrice,
-            urgentPhysicalCardPrice: urgentPrice,
-            currency: data.currency || 'USD',
-            isFallback: false
-          };
+          const result = normalizePricing(snap.data());
 
           cachedPricingData = result;
           return result;
         } else {
-          // If pricing is not set yet in Firestore, default to standard pricing if none configured
-          const result: CardPricingSettings = {
-            virtualCardPrice: 10,
-            physicalCardPrice: 15,
-            urgentPhysicalCardPrice: 15,
-            currency: 'USD',
-            isFallback: false
-          };
+          const result = DEFAULT_CONFIGURED_PRICING;
           cachedPricingData = result;
           return result;
         }
       } catch (error: any) {
         console.error('[PRICING_LOAD_ERROR]', error);
         return {
+          cardPrice: null,
+          printingPrice: null,
+          urgencyFee: null,
           virtualCardPrice: null,
           physicalCardPrice: null,
           urgentPhysicalCardPrice: null,
@@ -244,33 +266,20 @@ export const cardService = {
     const docRef = doc(db, 'app_settings', 'card_pricing');
     return onSnapshot(docRef, (snap) => {
       if (snap.exists()) {
-        const data = snap.data();
-        const vPrice = (typeof data.virtualCardPrice === 'number' && Number.isFinite(data.virtualCardPrice) && data.virtualCardPrice > 0) ? data.virtualCardPrice : null;
-        const pPrice = (typeof data.physicalCardPrice === 'number' && Number.isFinite(data.physicalCardPrice) && data.physicalCardPrice > 0) ? data.physicalCardPrice : null;
-        const urgentPrice = (typeof data.urgentPhysicalCardPrice === 'number' && Number.isFinite(data.urgentPhysicalCardPrice) && data.urgentPhysicalCardPrice > 0) ? data.urgentPhysicalCardPrice : null;
-        const res: CardPricingSettings = {
-          virtualCardPrice: vPrice,
-          physicalCardPrice: pPrice,
-          urgentPhysicalCardPrice: urgentPrice,
-          currency: data.currency || 'USD',
-          isFallback: false
-        };
+        const res = normalizePricing(snap.data());
         cachedPricingData = res;
         callback(res);
       } else {
-        const res: CardPricingSettings = {
-          virtualCardPrice: 10,
-          physicalCardPrice: 15,
-          urgentPhysicalCardPrice: 15,
-          currency: 'USD',
-          isFallback: false
-        };
+        const res = DEFAULT_CONFIGURED_PRICING;
         cachedPricingData = res;
         callback(res);
       }
     }, (err) => {
       console.warn('[SUBSCRIBE_PRICING_ERROR]', err);
       callback({
+        cardPrice: null,
+        printingPrice: null,
+        urgencyFee: null,
         virtualCardPrice: null,
         physicalCardPrice: null,
         urgentPhysicalCardPrice: null,
@@ -284,27 +293,21 @@ export const cardService = {
    * Updates card pricing in Firestore
    */
   async updatePricing(params: {
-    virtualCardPrice: number | null;
-    physicalCardPrice: number | null;
-    urgentPhysicalCardPrice: number | null;
+    cardPrice: number | null;
+    printingPrice: number | null;
+    urgencyFee: number | null;
     currency?: string;
   }): Promise<void> {
     const docRef = doc(db, 'app_settings', 'card_pricing');
     const payload = {
-      virtualCardPrice: (params.virtualCardPrice !== null && params.virtualCardPrice > 0) ? Number(params.virtualCardPrice) : null,
-      physicalCardPrice: (params.physicalCardPrice !== null && params.physicalCardPrice > 0) ? Number(params.physicalCardPrice) : null,
-      urgentPhysicalCardPrice: (params.urgentPhysicalCardPrice !== null && params.urgentPhysicalCardPrice > 0) ? Number(params.urgentPhysicalCardPrice) : null,
+      cardPrice: validPrice(params.cardPrice),
+      printingPrice: validPrice(params.printingPrice),
+      urgencyFee: validPrice(params.urgencyFee),
       currency: params.currency || 'USD',
       updatedAt: Date.now()
     };
     await setDoc(docRef, removeUndefined(payload), { merge: true });
-    cachedPricingData = {
-      virtualCardPrice: payload.virtualCardPrice,
-      physicalCardPrice: payload.physicalCardPrice,
-      urgentPhysicalCardPrice: payload.urgentPhysicalCardPrice,
-      currency: payload.currency,
-      isFallback: false
-    };
+    cachedPricingData = normalizePricing(payload);
   },
 
   /**
@@ -341,10 +344,21 @@ export const cardService = {
 
   async savePaymentMethods(items: PaymentMethodItem[]): Promise<void> {
     const docRef = doc(db, 'app_settings', 'payment_methods');
+    const cleanedItems = items.map(item => removeUndefined(item))
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
     await setDoc(docRef, {
-      items: removeUndefined(items),
+      items: cleanedItems,
       updatedAt: Date.now()
     });
+
+    const persistedSnap = await getDoc(docRef);
+    const persistedItems = persistedSnap.exists() && Array.isArray(persistedSnap.data().items)
+      ? (persistedSnap.data().items as PaymentMethodItem[]).sort((a, b) => (a.order || 0) - (b.order || 0))
+      : [];
+
+    if (JSON.stringify(persistedItems) !== JSON.stringify(cleanedItems)) {
+      throw new Error('PAYMENT_METHOD_PERSISTENCE_MISMATCH');
+    }
   },
 
   async addOrUpdatePaymentMethod(method: PaymentMethodItem): Promise<void> {
@@ -358,12 +372,23 @@ export const cardService = {
       updated = [...current, { ...method, createdAt: Date.now(), updatedAt: Date.now() }];
     }
     await this.savePaymentMethods(updated);
+
+    const persisted = await this.getPaymentMethods();
+    const saved = persisted.find(item => item.id === method.id);
+    if (!saved || saved.number !== method.number || saved.active !== method.active) {
+      throw new Error('PAYMENT_METHOD_NOT_CONFIRMED');
+    }
   },
 
   async deletePaymentMethod(id: string): Promise<void> {
     const current = await this.getPaymentMethods();
     const updated = current.filter(m => m.id !== id);
     await this.savePaymentMethods(updated);
+
+    const persisted = await this.getPaymentMethods();
+    if (persisted.some(item => item.id === id)) {
+      throw new Error('PAYMENT_METHOD_DELETE_NOT_CONFIRMED');
+    }
   },
 
   /**
@@ -429,7 +454,7 @@ export const cardService = {
 
   /**
    * Generates a guaranteed unique, sequential Card Identifier on Firestore.
-   * Format: MC-001-YYYYMMDD (e.g. MC-001-20260823)
+   * Format: MC-{NNN}{YYYY}{MM}{DD} (e.g. MC-00120260823)
    */
   async generateUniqueCardIdentifier(targetDate = new Date()): Promise<string> {
     const year = targetDate.getFullYear();
@@ -439,29 +464,19 @@ export const cardService = {
     const counterDocId = `global_card_counter`;
     const counterRef = doc(db, 'counters', counterDocId);
 
-    try {
-      const nextOrder = await runTransaction(db, async (transaction) => {
-        const counterSnap = await transaction.get(counterRef);
-        let currentCount = 0;
-        if (counterSnap.exists()) {
-          currentCount = counterSnap.data().count || 0;
-        }
-        const updatedCount = currentCount + 1;
-        transaction.set(counterRef, {
-          count: updatedCount,
-          lastGeneratedAt: Date.now()
-        }, { merge: true });
-        return updatedCount;
-      });
+    const nextOrder = await runTransaction(db, async (transaction) => {
+      const counterSnap = await transaction.get(counterRef);
+      const currentCount = counterSnap.exists() ? Number(counterSnap.data().count || 0) : 0;
+      const updatedCount = currentCount + 1;
+      transaction.set(counterRef, {
+        count: updatedCount,
+        lastGeneratedAt: Date.now()
+      }, { merge: true });
+      return updatedCount;
+    });
 
-      const orderStr = String(nextOrder).padStart(3, '0');
-      return `MC-${orderStr}${dateStr}`;
-    } catch (error) {
-      console.warn('[TRANSACTION_FALLBACK_ID_GENERATION]', error);
-      // Fallback in case of network glitch
-      const randomOrder = Math.floor(100 + Math.random() * 900);
-      return `MC-${randomOrder}${dateStr}`;
-    }
+    const orderStr = String(nextOrder).padStart(3, '0');
+    return `MC-${orderStr}${dateStr}`;
   },
 
   async generateNextCardIdentifier(targetDate = new Date()): Promise<string> {
@@ -560,19 +575,25 @@ export const cardService = {
   
   async addCardToStock(params: {
     cardNumber: string;
-    cardHolder: string;
     expiryStart: string;
     expiryEnd: string;
     cvv: string;
-    rechargeNumber?: string;
-    network: 'visa' | 'mastercard' | 'amex' | 'other';
-    type: 'virtual' | 'physical';
+    rechargeNumber: string;
     creator: { email: string; uid: string; agencyId?: string; agencyName?: string };
   }): Promise<UserCard> {
     const cardId = doc(collection(db, 'cards')).id;
+    const cleanCardNum = params.cardNumber.replace(/\D/g, '');
+    const cleanRechargeNumber = params.rechargeNumber.replace(/\s+/g, '');
+
+    if (!/^\d{16}$/.test(cleanCardNum)) throw new Error('INVALID_CARD_NUMBER');
+    if (!cleanRechargeNumber) throw new Error('INVALID_RECHARGE_NUMBER');
+    if (!/^\d{3,4}$/.test(params.cvv)) throw new Error('INVALID_CVV');
+    if (!/^(0[1-9]|1[0-2])\/\d{2}$/.test(params.expiryStart) || !/^(0[1-9]|1[0-2])\/\d{2}$/.test(params.expiryEnd)) {
+      throw new Error('INVALID_EXPIRY');
+    }
+
     const cardIdentifier = await this.generateUniqueCardIdentifier();
-    
-    const cleanCardNum = params.cardNumber.replace(/\s+/g, '');
+    const neutralHolder = 'CLIENT MARKET-CASH';
     
     const newCard: UserCard = {
       id: cardId,
@@ -582,17 +603,18 @@ export const cardService = {
       userName: '',
       userEmail: '',
       cardNumber: cleanCardNum,
-      cardHolder: params.cardHolder.trim(),
-      cardHolderName: params.cardHolder.trim(),
+      cardHolder: neutralHolder,
+      cardHolderName: neutralHolder,
       expiryStart: params.expiryStart || '02/27',
       expiryEnd: params.expiryEnd || '08/27',
       expiry: params.expiryEnd || '08/27',
-      cvv: params.cvv || '551',
-      rechargeNumber: params.rechargeNumber?.trim() || undefined,
-      network: params.network || 'visa',
-      type: params.type,
+      cvv: params.cvv,
+      rechargeNumber: cleanRechargeNumber,
+      network: 'visa',
+      type: 'virtual',
       status: 'disabled',
       saleStatus: 'available',
+      qrData: `MC:${cardIdentifier}`,
       createdAt: Date.now(),
       updatedAt: Date.now()
     };
@@ -601,12 +623,18 @@ export const cardService = {
     return newCard;
   },
 
-  async getAvailableStockCount(): Promise<{ virtual: number; physical: number }> {
-    const q = query(collection(db, 'cards'), where('saleStatus', '==', 'available'));
-    const snap = await getDocs(q);
-    let virtual = snap.size;
-    let physical = 0; // physical stock is no longer tracked this way
-    return { virtual, physical };
+  async getAvailableStockCount(): Promise<{ available: number; reserved: number; sold: number; total: number; virtual: number; physical: number }> {
+    const snap = await getDocs(collection(db, 'cards'));
+    let available = 0;
+    let reserved = 0;
+    let sold = 0;
+    snap.forEach(cardDoc => {
+      const status = cardDoc.data().saleStatus;
+      if (status === 'available') available += 1;
+      else if (status === 'reserved') reserved += 1;
+      else sold += 1;
+    });
+    return { available, reserved, sold, total: snap.size, virtual: available, physical: 0 };
   },
 
   async approveRequestWithStock(requestId: string, _type: string, adminData: { uid: string, email: string }): Promise<UserCard> {
@@ -639,6 +667,16 @@ export const cardService = {
           
           const reqData = reqDoc.data();
           const cardData = cDoc.data() as UserCard;
+          const urgentProcessing = reqData.urgentProcessing === true || reqData.physicalOption === 'urgent';
+          const printRequested = typeof reqData.printRequested === 'boolean'
+            ? reqData.printRequested
+            : reqData.physicalOption === 'normal' || reqData.physicalOption === 'urgent';
+
+          // Existing requests created before the identity workflow remain approvable.
+          // Every new normal request explicitly carries identityRequired=true.
+          if (!urgentProcessing && reqData.identityRequired === true && !reqData.identityProofUrl) {
+            throw new Error('IDENTITY_REQUIRED');
+          }
           
           // Update Card
           const updatedCard = {
@@ -646,8 +684,13 @@ export const cardService = {
             userId: reqData.userId,
             userName: reqData.userName || reqData.fullName,
             userEmail: reqData.userEmail || reqData.clientEmail || '',
+            cardHolder: urgentProcessing ? (cardData.cardHolder || 'CLIENT MARKET-CASH') : (reqData.fullName || reqData.userName || cardData.cardHolder),
+            cardHolderName: urgentProcessing ? (cardData.cardHolderName || 'CLIENT MARKET-CASH') : (reqData.fullName || reqData.userName || cardData.cardHolderName),
             status: 'active',
             saleStatus: 'sold',
+            printStatus: printRequested ? 'pending' : cardData.printStatus,
+            printReady: printRequested,
+            isPhysical: printRequested,
             soldAt: Date.now(),
             soldBy: adminData.email,
             updatedAt: Date.now()
@@ -659,26 +702,10 @@ export const cardService = {
           transaction.update(requestRef, {
             status: 'approved',
             assignedCardId: cardDoc.id,
+            identityVerified: !urgentProcessing,
             processedAt: Date.now(),
             processedBy: adminData.uid
           });
-          
-          if (reqData.physicalOption === 'normal' || reqData.physicalOption === 'urgent') {
-            const physicalReqRef = doc(collection(db, 'physical_card_requests'));
-            transaction.set(physicalReqRef, {
-              id: physicalReqRef.id,
-              userId: reqData.userId,
-              userEmail: reqData.userEmail || '',
-              userName: reqData.userName || reqData.fullName || '',
-              cardId: cardData.cardId,
-              cardIdentifier: cardData.cardIdentifier,
-              isUrgent: reqData.physicalOption === 'urgent',
-              status: 'pending',
-              designChoice: 'default',
-              createdAt: Date.now(),
-              updatedAt: Date.now()
-            });
-          }
           
           return updatedCard as UserCard;
         });
@@ -695,8 +722,69 @@ export const cardService = {
     if (!assignedCard) {
       throw new Error('STOCK_EMPTY'); // All tried cards were unavailable
     }
+
+    const requestSnap = await getDoc(requestRef);
+    const requestData = requestSnap.data();
+    const printRequested = typeof requestData?.printRequested === 'boolean'
+      ? requestData.printRequested
+      : requestData?.physicalOption === 'normal' || requestData?.physicalOption === 'urgent';
+    if (printRequested) {
+      await this.notifyRole(
+        'designer_graphique',
+        'Nouvelle carte à imprimer',
+        `La carte ${assignedCard.cardIdentifier || assignedCard.cardId} est prête pour le workflow d'impression PVC.`,
+        assignedCard.cardIdentifier
+      );
+    }
     
     return assignedCard;
+  },
+
+  async assignAvailableCardToClient(params: {
+    userId: string;
+    userName: string;
+    userEmail: string;
+    assignedBy: string;
+    agencyId?: string;
+    agencyName?: string;
+    printRequested?: boolean;
+  }): Promise<UserCard> {
+    const available = await getDocs(query(collection(db, 'cards'), where('saleStatus', '==', 'available'), limit(10)));
+    if (available.empty) throw new Error('STOCK_EMPTY');
+
+    for (const candidate of available.docs) {
+      try {
+        return await runTransaction(db, async transaction => {
+          const cardSnap = await transaction.get(candidate.ref);
+          if (!cardSnap.exists() || cardSnap.data().saleStatus !== 'available') throw new Error('CARD_UNAVAILABLE');
+          const card = cardSnap.data() as UserCard;
+          const updated = removeUndefined({
+            ...card,
+            userId: params.userId,
+            userName: params.userName,
+            userEmail: params.userEmail,
+            cardHolder: params.userName || card.cardHolder || 'CLIENT MARKET-CASH',
+            cardHolderName: params.userName || card.cardHolderName || 'CLIENT MARKET-CASH',
+            status: 'active',
+            saleStatus: 'sold',
+            isPhysical: params.printRequested === true,
+            printReady: params.printRequested === true,
+            printStatus: params.printRequested ? 'pending' : card.printStatus,
+            soldAt: Date.now(),
+            soldBy: params.assignedBy,
+            soldByAgencyId: params.agencyId,
+            soldByAgencyName: params.agencyName,
+            updatedAt: Date.now()
+          });
+          transaction.set(candidate.ref, updated, { merge: true });
+          return updated as UserCard;
+        });
+      } catch (error: any) {
+        if (error?.message === 'CARD_UNAVAILABLE') continue;
+        throw error;
+      }
+    }
+    throw new Error('STOCK_EMPTY');
   },
 async confirmAndIssuePhysicalCard(params: {
     userId: string;
@@ -1099,13 +1187,14 @@ async confirmAndIssuePhysicalCard(params: {
   /**
    * Updates card design configuration in Firestore.
    */
-  async updateCardDesign(params: { backgroundUrl: string; userEmail: string }): Promise<void> {
+  async updateCardDesign(params: { backgroundUrl: string; userEmail: string; designJson?: string }): Promise<void> {
     const designRef = doc(db, 'app_settings', 'card_design');
     const existing = await this.getCardDesign();
     const newVersion = (existing?.version || 0) + 1;
 
     const payload: CardDesignSettings = {
       backgroundUrl: params.backgroundUrl,
+      designJson: params.designJson,
       updatedAt: Date.now(),
       updatedBy: params.userEmail,
       version: newVersion,

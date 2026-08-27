@@ -4,7 +4,6 @@ import { db } from '../../firebase/config';
 import { UserCard, User } from '../../types';
 import { useAuthStore } from '../../store/authStore';
 import { cardService } from '../../services/cardService';
-import { cleanFirestoreData } from '../../lib/firestoreUtils';
 import { downloadPvcCardImage } from '../../lib/pvcCardGenerator';
 import toast from 'react-hot-toast';
 import { 
@@ -46,13 +45,7 @@ export default function AgencyCards() {
     userId: '',
     clientName: '',
     clientEmail: '',
-    cardNumber: '',
-    cardHolder: '',
-    expiryStart: '02/27',
-    expiryEnd: '08/27',
-    cvv: '551',
-    rechargeNumber: '',
-    network: 'visa' as const
+    cardHolder: ''
   });
 
   useEffect(() => {
@@ -99,19 +92,11 @@ export default function AgencyCards() {
   };
 
   const handleOpenDirectSale = () => {
-    const randomDigits = Math.floor(1000 + Math.random() * 9000);
-    const randomCVV = Math.floor(100 + Math.random() * 900).toString();
     setSaleForm({
       userId: '',
       clientName: '',
       clientEmail: '',
-      cardNumber: `4532 •••• •••• ${randomDigits}`,
-      cardHolder: '',
-      expiryStart: '02/27',
-      expiryEnd: '08/27',
-      cvv: randomCVV,
-      rechargeNumber: `RC-${Date.now().toString().slice(-6)}`,
-      network: 'visa'
+      cardHolder: ''
     });
     setShowDirectSaleModal(true);
   };
@@ -139,48 +124,24 @@ export default function AgencyCards() {
 
     setIsProcessing(true);
     try {
-      // 1. Generate unique sequential card identifier MC-001-YYYYMMDD
-      const cardIdentifier = await cardService.generateNextCardIdentifier();
-
-      // 2. Target user ID
       const targetUserId = saleForm.userId || 'direct_sale_' + Date.now();
-
-      // 3. Create Card in Firestore
-      const cardId = doc(collection(db, 'cards')).id;
-      const newCard: Partial<UserCard> = {
-        id: cardId,
-        cardId: cardId,
-        cardIdentifier,
+      const newCard = await cardService.assignAvailableCardToClient({
         userId: targetUserId,
-        userName: saleForm.clientName || saleForm.clientEmail,
+        userName: saleForm.cardHolder.trim().toUpperCase() || saleForm.clientName || 'CLIENT MARKET-CASH',
         userEmail: saleForm.clientEmail,
-        cardNumber: saleForm.cardNumber,
-        cardHolder: saleForm.cardHolder.toUpperCase(),
-        expiryStart: saleForm.expiryStart,
-        expiryEnd: saleForm.expiryEnd,
-        cvv: saleForm.cvv,
-        rechargeNumber: saleForm.rechargeNumber,
-        network: saleForm.network,
-        type: 'physical',
-        status: 'active',
-        saleStatus: 'sold',
-        soldAt: Date.now(),
-        soldByAgencyId: user.agencyId || user.uid,
-        soldByAgencyName: user.agencyName || user.displayName || 'Agence Locale',
-        printStatus: 'pending',
-        isPhysical: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-      };
-
-      await setDoc(doc(db, 'cards', cardId), cleanFirestoreData(newCard));
+        assignedBy: user.email,
+        agencyId: user.agencyId || user.uid,
+        agencyName: user.agencyName || user.displayName || 'Agence Locale',
+        printRequested: true
+      });
+      const cardIdentifier = newCard.cardIdentifier;
 
       // 4. If linked to an app user, notify them
       if (saleForm.userId) {
         await setDoc(doc(collection(db, 'notifications')), {
           userId: saleForm.userId,
           title: 'Nouvelle carte émise',
-          message: `Votre agence vous a attribué la carte physique ${cardIdentifier}.`,
+          message: `Votre agence vous a attribué la carte Market-Cash ${cardIdentifier}, préparée pour impression.`,
           type: 'success',
           read: false,
           createdAt: Date.now()
@@ -191,14 +152,15 @@ export default function AgencyCards() {
       await cardService.notifyRole(
         'designer_graphique',
         'Nouvelle carte à imprimer',
-        `Une vente directe ${cardIdentifier} a été effectuée pour ${newCard.cardHolder}. Prête pour impression PVC.`
+        `Une vente directe ${cardIdentifier} a été effectuée pour ${newCard.cardHolder}. Prête pour impression PVC.`,
+        cardIdentifier
       );
 
       toast.success(`Vente enregistrée ! Carte ${cardIdentifier} transmise au designer.`);
       setShowDirectSaleModal(false);
     } catch (err: any) {
       console.error('[DIRECT_SALE_ERR]', err);
-      toast.error('Erreur lors de l\'enregistrement de la vente.');
+      toast.error(err?.message === 'STOCK_EMPTY' ? 'Stock épuisé : aucune carte préconfigurée disponible.' : "Erreur lors de l'enregistrement de la vente.");
     } finally {
       setIsProcessing(false);
     }

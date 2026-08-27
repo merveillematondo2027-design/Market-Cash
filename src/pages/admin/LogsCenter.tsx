@@ -13,6 +13,17 @@ export const LogsCenter = () => {
   const [selectedLog, setSelectedLog] = useState<AppLog | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
+  const redactText = (value: string) => value
+    .replace(/\b\d{16}\b/g, '••••••••••••••••')
+    .replace(/(cvv|pin|token)\s*[:=]\s*\S+/gi, '$1: [MASQUÉ]');
+
+  const safeMetadata = (metadata: Record<string, unknown>) => Object.fromEntries(
+    Object.entries(metadata).map(([key, value]) => {
+      if (/(pin|cvv|token|secret|cardnumber|rechargenumber|proof)/i.test(key)) return [key, '[MASQUÉ]'];
+      return [key, typeof value === 'string' ? redactText(value) : value];
+    })
+  );
+
   useEffect(() => {
     const q = query(
       collection(db, 'appLogs'),
@@ -91,7 +102,7 @@ Email: ${log.userEmail || 'N/A'}
 Collection: ${log.collection || 'N/A'}
 Operation: ${log.operation || 'N/A'}
 Error: ${log.errorCode || 'N/A'}
-Message: ${log.message}`;
+Message: ${redactText(log.message)}`;
     
     navigator.clipboard.writeText(text);
     alert('Diagnostic copié dans le presse-papier');
@@ -222,6 +233,7 @@ Message: ${log.message}`;
           <option value="CARD">CARD</option>
           <option value="STOCK">STOCK</option>
           <option value="DELIVERY">DELIVERY</option>
+          <option value="SECURITY">SECURITY</option>
           <option value="SYSTEM">SYSTEM</option>
           <option value="UI">UI</option>
         </select>
@@ -238,11 +250,12 @@ Message: ${log.message}`;
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase tracking-wider text-slate-500">
-                  <th className="p-4 font-black">Heure</th>
+                  <th className="p-4 font-black">Date / Heure</th>
                   <th className="p-4 font-black">Niveau</th>
                   <th className="p-4 font-black">Catégorie</th>
                   <th className="p-4 font-black">Événement</th>
-                  <th className="p-4 font-black">Message</th>
+                  <th className="p-4 font-black">Opération / Résultat</th>
+                  <th className="p-4 font-black">Erreur</th>
                   <th className="p-4 font-black">Utilisateur</th>
                 </tr>
               </thead>
@@ -254,7 +267,7 @@ Message: ${log.message}`;
                     className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer transition-colors"
                   >
                     <td className="p-4 whitespace-nowrap text-xs font-bold text-slate-600">
-                      {new Date(log.timestamp).toLocaleTimeString()}
+                      {new Date(log.timestamp).toLocaleString()}
                     </td>
                     <td className="p-4 whitespace-nowrap">
                       <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-black tracking-wider uppercase border ${getLevelColor(log.level)}`}>
@@ -268,8 +281,12 @@ Message: ${log.message}`;
                     <td className="p-4 whitespace-nowrap font-bold text-slate-800 text-xs">
                       {log.event}
                     </td>
-                    <td className="p-4 text-slate-600 text-xs max-w-xs truncate">
-                      {log.message}
+                    <td className="p-4 text-slate-600 text-xs max-w-xs">
+                      <div className="font-bold">{log.operation || log.route || '—'}</div>
+                      <div className={log.success === false ? 'text-red-600' : 'text-emerald-600'}>{log.success === false ? 'Échec' : log.success === true ? 'Succès' : 'Information'}</div>
+                    </td>
+                    <td className="p-4 text-red-600 text-xs max-w-[180px] truncate">
+                      {log.errorCode || log.errorName || '—'}
                     </td>
                     <td className="p-4 whitespace-nowrap">
                       <div className="text-xs font-bold text-slate-700">{log.userEmail || '-'}</div>
@@ -320,7 +337,7 @@ Message: ${log.message}`;
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                 <div className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Message</div>
                 <div className="text-sm font-medium text-slate-800 break-words">
-                  {selectedLog.message}
+                  {redactText(selectedLog.message)}
                 </div>
               </div>
 
@@ -352,7 +369,7 @@ Message: ${log.message}`;
                 <div>
                   <div className="text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Stack Trace</div>
                   <pre className="bg-slate-900 text-slate-300 p-4 rounded-xl text-[10px] overflow-x-auto whitespace-pre-wrap font-mono">
-                    {selectedLog.stack}
+                    {redactText(selectedLog.stack)}
                   </pre>
                 </div>
               )}
@@ -361,7 +378,7 @@ Message: ${log.message}`;
                 <div>
                   <div className="text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Metadata</div>
                   <pre className="bg-slate-100 text-slate-700 p-4 rounded-xl text-xs overflow-x-auto font-mono border border-slate-200">
-                    {JSON.stringify(selectedLog.metadata, null, 2)}
+                    {JSON.stringify(safeMetadata(selectedLog.metadata), null, 2)}
                   </pre>
                 </div>
               )}

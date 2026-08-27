@@ -42,6 +42,7 @@ import AdminNotifications from './pages/admin/Notifications';
 import AdminProfile from './pages/admin/AdminProfile';
 import AdminDesigner from './pages/admin/AdminDesigner';
 import AdminSettings from './pages/admin/Settings';
+import { LogsCenter } from './pages/admin/LogsCenter';
 
 // Agency Pages (Strictly chef_agence & admin_general)
 import AgencyDashboard from './pages/agency/AgencyDashboard';
@@ -191,7 +192,7 @@ export default function App() {
           <Route path="help" element={<AdminHelp />} />
           <Route path="notifications" element={<AdminNotifications />} />
           <Route path="profile" element={<AdminProfile />} />
-          <Route path="designer" element={<AdminDesigner />} />
+          <Route path="logs" element={<LogsCenter />} />
         </Route>
 
         {/* 3. CHEF D'AGENCE ROUTES (Strictly chef_agence & admin_general) */}
@@ -212,16 +213,17 @@ export default function App() {
           <Route path="profile" element={<AgencyProfile />} />
         </Route>
 
-        {/* 4. DESIGNER GRAPHIQUE ROUTES (Strictly designer_graphique & admin_general) */}
+        {/* 4. DESIGNER GRAPHIQUE ROUTES */}
         <Route
           path="/designer"
           element={
-            <RoleProtectedRoute allowedRoles={['designer_graphique', 'admin_general']}>
+            <RoleProtectedRoute allowedRoles={['designer_graphique']}>
               <DesignerLayout />
             </RoleProtectedRoute>
           }
         >
-          <Route index element={<Navigate to="/designer/cards" replace />} />
+          <Route index element={<Navigate to="/designer/design" replace />} />
+          <Route path="design" element={<AdminDesigner />} />
           <Route path="cards" element={<DesignerCards />} />
           <Route path="notifications" element={<DesignerNotifications />} />
           <Route path="profile" element={<DesignerProfile />} />

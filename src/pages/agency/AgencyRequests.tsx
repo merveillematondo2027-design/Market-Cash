@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, onSnapshot, doc, updateDoc, setDoc, getDocs } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, updateDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../firebase/config';
-import { CardPurchaseRequest, UserCard, User } from '../../types';
+import { CardPurchaseRequest } from '../../types';
 import { useAuthStore } from '../../store/authStore';
 import { cardService } from '../../services/cardService';
-import { cleanFirestoreData } from '../../lib/firestoreUtils';
 import toast from 'react-hot-toast';
 import { 
   FileText, 
@@ -18,7 +17,6 @@ import {
   Phone, 
   Mail, 
   Calendar,
-  Sparkles,
   ShieldCheck,
   AlertCircle,
   Building
@@ -37,18 +35,9 @@ export default function AgencyRequests() {
   const [activeFilter, setActiveFilter] = useState<'ALL' | 'pending' | 'approved' | 'rejected'>('pending');
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Approval Modal with card creation
+  // Approval uses the same atomic stock assignment as the admin flow.
   const [selectedReq, setSelectedReq] = useState<CardPurchaseRequest | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [cardFormData, setCardFormData] = useState({
-    cardNumber: '',
-    cardHolder: '',
-    expiryStart: '02/27',
-    expiryEnd: '08/27',
-    cvv: '551',
-    rechargeNumber: '',
-    network: 'visa' as const
-  });
 
   // Rejection modal
   const [rejectingReq, setRejectingReq] = useState<CardPurchaseRequest | null>(null);
@@ -73,91 +62,29 @@ export default function AgencyRequests() {
 
   const openApproveModal = (req: CardPurchaseRequest) => {
     setSelectedReq(req);
-    // Generate a default clean card format
-    const randomDigits = Math.floor(1000 + Math.random() * 9000);
-    const randomCVV = Math.floor(100 + Math.random() * 900).toString();
-    setCardFormData({
-      cardNumber: `4532 •••• •••• ${randomDigits}`,
-      cardHolder: (req.userName || req.userEmail?.split('@')[0] || 'TITULAIRE').toUpperCase(),
-      expiryStart: '02/27',
-      expiryEnd: '08/27',
-      cvv: randomCVV,
-      rechargeNumber: `RC-${Date.now().toString().slice(-6)}`,
-      network: 'visa'
-    });
   };
 
-  const handleConfirmApproval = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleConfirmApproval = async () => {
     if (!selectedReq || !user) return;
 
     setIsProcessing(true);
     try {
-      // 1. Generate unique sequential card identifier MC-001-YYYYMMDD
-      const cardIdentifier = await cardService.generateNextCardIdentifier();
-
-      // 2. Create the issued Card document in Firestore
-      const cardId = doc(collection(db, 'cards')).id;
-      const newCard: Partial<UserCard> = {
-        id: cardId,
-        cardId: cardId,
-        cardIdentifier,
+      const assignedCard = await cardService.approveRequestWithStock(selectedReq.id, 'virtual', { uid: user.uid, email: user.email });
+      await cardService.createNotification({
         userId: selectedReq.userId,
-        userName: selectedReq.userName || selectedReq.userEmail,
-        userEmail: selectedReq.userEmail,
-        cardNumber: cardFormData.cardNumber,
-        cardHolder: cardFormData.cardHolder.toUpperCase(),
-        expiryStart: cardFormData.expiryStart,
-        expiryEnd: cardFormData.expiryEnd,
-        cvv: cardFormData.cvv,
-        rechargeNumber: cardFormData.rechargeNumber,
-        network: cardFormData.network,
-        type: selectedReq.cardType || 'physical',
-        status: 'active',
-        saleStatus: 'sold',
-        soldAt: Date.now(),
-        soldByAgencyId: user.agencyId || user.uid,
-        soldByAgencyName: user.agencyName || user.displayName || 'Agence Locale',
-        printStatus: 'pending',
-        isPhysical: selectedReq.cardType === 'physical' || true,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-      };
-
-      await setDoc(doc(db, 'cards', cardId), cleanFirestoreData(newCard));
-
-      // 3. Update Request Status to approved
-      await updateDoc(doc(db, 'card_purchase_requests', selectedReq.id), {
-        status: 'approved',
-        processedAt: Date.now(),
-        processedBy: user.displayName || user.email,
-        assignedCardId: cardId,
-        assignedCardIdentifier: cardIdentifier,
-        updatedAt: Date.now()
-      });
-
-      // 4. Notify Client
-      await setDoc(doc(collection(db, 'notifications')), {
-        userId: selectedReq.userId,
-        title: 'Demande d\'achat approuvée !',
-        message: `Votre carte ${cardIdentifier} a été validée par votre agence et est en cours de préparation.`,
+        title: "Demande d'achat approuvée !",
+        message: `Votre carte Market-Cash ${assignedCard.cardIdentifier} vous a été attribuée.`,
         type: 'success',
-        read: false,
-        createdAt: Date.now()
+        requestId: selectedReq.id,
+        cardIdentifier: assignedCard.cardIdentifier
       });
-
-      // 5. Notify Designer Graphique for PVC Print
-      await cardService.notifyRole(
-        'designer_graphique',
-        'Nouvelle carte à imprimer',
-        `Une nouvelle carte ${cardIdentifier} pour ${newCard.cardHolder} est prête pour impression PVC.`
-      );
-
-      toast.success(`Demande validée ! Carte générée : ${cardIdentifier}`);
+      toast.success(`Demande validée : ${assignedCard.cardIdentifier}`);
       setSelectedReq(null);
     } catch (err: any) {
       console.error('[APPROVE_REQUEST_ERROR]', err);
-      toast.error('Erreur lors de la validation de la demande.');
+      if (err?.message === 'STOCK_EMPTY') toast.error('Stock épuisé : aucune carte préconfigurée disponible.');
+      else if (err?.message === 'IDENTITY_REQUIRED') toast.error("La pièce d'identité obligatoire doit être vérifiée avant attribution.");
+      else toast.error('Erreur lors de la validation de la demande.');
     } finally {
       setIsProcessing(false);
     }
@@ -360,134 +287,30 @@ export default function AgencyRequests() {
         </div>
       )}
 
-      {/* Approval & Card Issue Modal */}
+      {/* Approval from the unique preconfigured stock */}
       {selectedReq && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 z-50 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4 my-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
-                  <CreditCard size={18} />
-                </div>
-                <div>
-                  <h3 className="font-black text-slate-800 text-sm sm:text-base">Valider la Vente de Carte</h3>
-                  <p className="text-xs text-slate-500">Pour {selectedReq.userName || selectedReq.userEmail}</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setSelectedReq(null)}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg"
-              >
-                <X size={20} />
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5">
+            <div className="flex justify-between gap-3">
+              <div><h3 className="font-black text-blue-950 text-lg">Approuver et attribuer</h3>
+                <p className="text-xs text-slate-500 mt-1">Pour {selectedReq.userName || selectedReq.userEmail}</p></div>
+              <button type="button" onClick={() => setSelectedReq(null)} className="p-2 text-slate-500"><X size={19} /></button>
+            </div>
+            <div className="rounded-2xl bg-blue-50 border border-blue-200 p-4 text-sm text-blue-900">
+              Une carte Market-Cash disponible sera attribuée atomiquement. Aucun numéro, CVV ou code de recharge ne doit être saisi ici.
+            </div>
+            {selectedReq.identityRequired === true && !selectedReq.urgentProcessing && (
+              selectedReq.identityProofUrl
+                ? <a href={selectedReq.identityProofUrl} target="_blank" rel="noopener noreferrer" className="block text-center py-3 rounded-xl border border-blue-200 text-blue-700 font-bold">Vérifier la pièce d'identité</a>
+                : <p className="p-3 rounded-xl bg-red-50 text-red-700 font-bold text-sm">Pièce d'identité manquante — approbation bloquée.</p>
+            )}
+            <div className="flex gap-3">
+              <button type="button" onClick={() => setSelectedReq(null)} disabled={isProcessing} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold">Annuler</button>
+              <button type="button" onClick={handleConfirmApproval} disabled={isProcessing || (selectedReq.identityRequired === true && !selectedReq.urgentProcessing && !selectedReq.identityProofUrl)}
+                className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-black disabled:opacity-50">
+                {isProcessing ? 'Attribution…' : 'Confirmer'}
               </button>
             </div>
-
-            <form onSubmit={handleConfirmApproval} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Nom du Titulaire (inscrit sur la carte PVC)
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={cardFormData.cardHolder}
-                  onChange={(e) => setCardFormData({ ...cardFormData, cardHolder: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-bold uppercase focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Numéro de Carte
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={cardFormData.cardNumber}
-                    onChange={(e) => setCardFormData({ ...cardFormData, cardNumber: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Code CVV
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={4}
-                    value={cardFormData.cvv}
-                    onChange={(e) => setCardFormData({ ...cardFormData, cvv: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Période Validité
-                  </label>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="text"
-                      placeholder="02/27"
-                      value={cardFormData.expiryStart}
-                      onChange={(e) => setCardFormData({ ...cardFormData, expiryStart: e.target.value })}
-                      className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-center focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    />
-                    <span className="text-slate-400 text-xs">à</span>
-                    <input
-                      type="text"
-                      placeholder="08/27"
-                      value={cardFormData.expiryEnd}
-                      onChange={(e) => setCardFormData({ ...cardFormData, expiryEnd: e.target.value })}
-                      className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-center focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Numéro de Recharge
-                  </label>
-                  <input
-                    type="text"
-                    value={cardFormData.rechargeNumber}
-                    onChange={(e) => setCardFormData({ ...cardFormData, rechargeNumber: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-900 space-y-1">
-                <div className="font-bold flex items-center gap-1.5 text-blue-950">
-                  <Sparkles size={14} className="text-amber-500" />
-                  Génération Automatique
-                </div>
-                <p>
-                  Cette validation générera un identifiant unique <strong>MC-001-YYYYMMDD</strong> et transmettra la carte à l'atelier du <strong>Designer Graphique</strong> pour impression PVC.
-                </p>
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedReq(null)}
-                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl font-bold text-xs"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="submit"
-                  disabled={isProcessing}
-                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-md disabled:opacity-50"
-                >
-                  <Check size={16} />
-                  <span>{isProcessing ? 'Validation...' : 'Confirmer Vente'}</span>
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}

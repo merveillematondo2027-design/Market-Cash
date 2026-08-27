@@ -1,11 +1,11 @@
 import { LogsCenter } from './LogsCenter';
 import {   useState, useEffect } from 'react';
-import {  useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {  useAuthStore } from '../../store/authStore';
 import {  cardService, CardPricingSettings } from '../../services/cardService';
 import {  PaymentMethodItem } from '../../types';
 import {  
-  User, LogOut, Settings, DollarSign, CreditCard, Smartphone, Plus, Edit3, Trash2, Check, X, Save, ShieldCheck, HelpCircle, Bell, Palette, Sparkles, Server, Lock, ExternalLink, ChevronRight, AlertCircle, ToggleLeft, ToggleRight, Copy, Info, Activity, Image as ImageIcon } from 'lucide-react';
+  User, LogOut, Settings, DollarSign, CreditCard, Smartphone, Plus, Edit3, Trash2, Check, X, Save, ShieldCheck, HelpCircle, Bell, Palette, Server, Lock, ExternalLink, ChevronRight, AlertCircle, ToggleLeft, ToggleRight, Copy, Info, Activity } from 'lucide-react';
 import LogoutModal from '../../components/LogoutModal';
 import toast from 'react-hot-toast';
 
@@ -13,19 +13,22 @@ export default function AdminProfile() {
   const { user } = useAuthStore();
   const navigate = useNavigate();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
-  const [urgentPriceInput, setUrgentPriceInput] = useState('15');
+  const [urgencyFeeInput, setUrgencyFeeInput] = useState('');
   const [activeTab, setActiveTab] = useState<'app_settings' | 'system_settings' | 'logs'>('app_settings');
   const isSuperAdmin = user?.role === 'admin_general';
 
   // Pricing State
   const [pricing, setPricing] = useState<CardPricingSettings>({
+    cardPrice: null,
+    printingPrice: null,
+    urgencyFee: null,
     virtualCardPrice: null,
-      urgentPhysicalCardPrice: null,
     physicalCardPrice: null,
+    urgentPhysicalCardPrice: null,
     currency: 'USD'
   });
-  const [virtualPriceInput, setVirtualPriceInput] = useState<string>('');
-  const [physicalPriceInput, setPhysicalPriceInput] = useState<string>('');
+  const [cardPriceInput, setCardPriceInput] = useState<string>('');
+  const [printingPriceInput, setPrintingPriceInput] = useState<string>('');
   const [currencyInput, setCurrencyInput] = useState<string>('USD');
   const [savingPricing, setSavingPricing] = useState(false);
 
@@ -38,9 +41,9 @@ export default function AdminProfile() {
     // 1. Subscribe to pricing
     const unsubPricing = cardService.subscribePricing((p) => {
       setPricing(p);
-      setVirtualPriceInput(p.virtualCardPrice !== null ? String(p.virtualCardPrice) : '');
-        setUrgentPriceInput(p.urgentPhysicalCardPrice !== null ? String(p.urgentPhysicalCardPrice) : '');
-      setPhysicalPriceInput(p.physicalCardPrice !== null ? String(p.physicalCardPrice) : '');
+      setCardPriceInput(p.cardPrice !== null ? String(p.cardPrice) : '');
+      setUrgencyFeeInput(p.urgencyFee !== null ? String(p.urgencyFee) : '');
+      setPrintingPriceInput(p.printingPrice !== null ? String(p.printingPrice) : '');
       setCurrencyInput(p.currency || 'USD');
     });
 
@@ -62,31 +65,31 @@ export default function AdminProfile() {
       return;
     }
 
-    const vPrice = virtualPriceInput.trim() ? parseFloat(virtualPriceInput) : null;
-    const pPrice = physicalPriceInput.trim() ? parseFloat(physicalPriceInput) : null;
-    const urgentPrice = urgentPriceInput.trim() ? parseFloat(urgentPriceInput) : null;
+    const vPrice = cardPriceInput.trim() ? parseFloat(cardPriceInput) : null;
+    const pPrice = printingPriceInput.trim() ? parseFloat(printingPriceInput) : null;
+    const urgentPrice = urgencyFeeInput.trim() ? parseFloat(urgencyFeeInput) : null;
 
     if (vPrice !== null && (isNaN(vPrice) || vPrice < 0)) {
-      toast.error('Le prix de la carte virtuelle doit être un nombre positif ou vide.');
+      toast.error('Le prix de la carte doit être un nombre positif ou vide.');
       return;
     }
 
     if (pPrice !== null && (isNaN(pPrice) || pPrice < 0)) {
-      toast.error('Le prix de la carte physique doit être un nombre positif ou vide.');
+      toast.error("Le prix de l'impression doit être un nombre positif ou vide.");
       return;
     }
 
     if (urgentPrice !== null && (isNaN(urgentPrice) || urgentPrice < 0)) {
-      toast.error('Le prix de la carte physique urgente doit être un nombre positif ou vide.');
+      toast.error("Les frais d'urgence doivent être un nombre positif ou vide.");
       return;
     }
 
     setSavingPricing(true);
     try {
       await cardService.updatePricing({
-        virtualCardPrice: vPrice,
-        physicalCardPrice: pPrice,
-        urgentPhysicalCardPrice: urgentPrice,
+        cardPrice: vPrice,
+        printingPrice: pPrice,
+        urgencyFee: urgentPrice,
         currency: currencyInput.trim() || 'USD'
       });
       toast.success('Tarifs des cartes enregistrés avec succès dans Firestore !');
@@ -134,7 +137,6 @@ export default function AdminProfile() {
       await cardService.addOrUpdatePaymentMethod(methodToSave);
       toast.success('Moyen de paiement enregistré avec succès !');
       setEditingMethod(null);
-  const isSuperAdmin = user?.role === 'admin_general';
     } catch (err: any) {
       console.error('[PAYMENT_METHOD_SAVE_ERROR]', err);
       toast.error(`Erreur : ${err?.message || 'Impossible de sauvegarder'}`);
@@ -258,29 +260,8 @@ export default function AdminProfile() {
           <div className="space-y-6 animate-in fade-in">
             {/* SECTION 1.1 : PRIX DES CARTES (VIRTUELLE & PHYSIQUE) */}
             
-            {/* SECTION 1.3 : DESIGNER DE CARTES */}
-            <div className="bg-gradient-to-r from-pink-500 to-rose-500 rounded-[2rem] p-6 sm:p-8 text-white shadow-lg space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center font-bold">
-                    <ImageIcon size={24} />
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-black text-white">Designer de Cartes (Canva-like)</h2>
-                    <p className="text-sm text-pink-100 mt-1">Créez et modifiez l'apparence des cartes physiques et virtuelles.</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => navigate('/admin/designer')}
-                  className="bg-white text-pink-600 hover:bg-pink-50 font-black py-3 px-6 rounded-xl transition cursor-pointer shadow-md shrink-0 flex items-center justify-center gap-2"
-                >
-                  <Sparkles size={18} /> Ouvrir le Designer
-                </button>
-              </div>
-            </div>
-
-
-<div className="bg-white rounded-[2rem] p-6 sm:p-8 border border-slate-200/90 shadow-sm space-y-5">
+            {/* La création graphique est réservée à l’espace designer_graphique. */}
+            <div className="bg-white rounded-[2rem] p-6 sm:p-8 border border-slate-200/90 shadow-sm space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold">
@@ -295,14 +276,14 @@ export default function AdminProfile() {
                 </div>
                 <div className="flex gap-2">
                   <span className={`text-[11px] font-bold px-2.5 py-1 rounded-xl flex items-center gap-1 ${
-                    pricing.virtualCardPrice ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'
+                    pricing.cardPrice ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'
                   }`}>
-                    Virtuelle : {pricing.virtualCardPrice ? `${pricing.virtualCardPrice} ${pricing.currency}` : 'Non configuré'}
+                    Carte : {pricing.cardPrice ? `${pricing.cardPrice} ${pricing.currency}` : 'Non configuré'}
                   </span>
                   <span className={`text-[11px] font-bold px-2.5 py-1 rounded-xl flex items-center gap-1 ${
-                    pricing.physicalCardPrice ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'
+                    pricing.printingPrice ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'
                   }`}>
-                    Physique : {pricing.physicalCardPrice ? `${pricing.physicalCardPrice} ${pricing.currency}` : 'Non configuré'}
+                    Impression : {pricing.printingPrice ? `${pricing.printingPrice} ${pricing.currency}` : 'Non configuré'}
                   </span>
                 </div>
               </div>
@@ -310,15 +291,15 @@ export default function AdminProfile() {
               <form onSubmit={handleSavePricing} className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                    Prix Carte Virtuelle (USD)
+                    Prix de la carte
                   </label>
                   <input
                     type="number"
                     step="0.01"
                     min="0"
                     placeholder="Ex: 10"
-                    value={virtualPriceInput}
-                    onChange={(e) => setVirtualPriceInput(e.target.value)}
+                    value={cardPriceInput}
+                    onChange={(e) => setCardPriceInput(e.target.value)}
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none font-bold text-slate-800 text-sm"
                   />
                   <span className="text-[10px] text-slate-400 mt-1 block">Laissez vide pour désactiver l'achat</span>
@@ -327,29 +308,29 @@ export default function AdminProfile() {
                 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                    Prix Carte Physique Urgente (USD)
+                    Frais d'urgence
                   </label>
                   <input
                     type="number"
                     step="0.01"
                     min="0"
-                    value={urgentPriceInput}
-                    onChange={e => setUrgentPriceInput(e.target.value)}
+                    value={urgencyFeeInput}
+                    onChange={e => setUrgencyFeeInput(e.target.value)}
                     className="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-blue-50 outline-none transition-all font-semibold text-slate-800 text-sm"
                     placeholder="Ex: 10"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                    Prix Carte Physique (USD)
+                    Prix de l'impression
                   </label>
                   <input
                     type="number"
                     step="0.01"
                     min="0"
                     placeholder="Ex: 15"
-                    value={physicalPriceInput}
-                    onChange={(e) => setPhysicalPriceInput(e.target.value)}
+                    value={printingPriceInput}
+                    onChange={(e) => setPrintingPriceInput(e.target.value)}
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none font-bold text-slate-800 text-sm"
                   />
                   <span className="text-[10px] text-slate-400 mt-1 block">Laissez vide pour désactiver l'achat</span>

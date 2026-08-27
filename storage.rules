@@ -51,6 +51,14 @@ service firebase.storage {
       allow delete: if isOwner(userId) || isChefAgence();
     }
 
+    match /identity-proofs/{userId}/{fileName} {
+      allow read: if isOwner(userId) || isChefAgence();
+      allow create: if isOwner(userId)
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp|jpg)');
+      allow delete: if isOwner(userId) || isChefAgence();
+    }
+
     match /market-cash/purchase-proofs/{userId}/{fileName} {
       allow read: if isOwner(userId) || isChefAgence();
       allow create: if isOwner(userId)

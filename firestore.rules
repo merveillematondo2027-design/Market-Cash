@@ -66,6 +66,21 @@ service cloud.firestore {
       return isAdminGeneral() || isChefAgence() || isDesignerGraphique() || isLivreur();
     }
 
+    function hasValidPurchasePrice() {
+      let pricing = get(/databases/$(database)/documents/app_settings/card_pricing).data;
+      let cardPrice = pricing.keys().hasAny(['cardPrice']) ? pricing.cardPrice : pricing.virtualCardPrice;
+      let printingPrice = pricing.keys().hasAny(['printingPrice']) ? pricing.printingPrice : pricing.physicalCardPrice;
+      let urgencyFee = pricing.keys().hasAny(['urgencyFee']) ? pricing.urgencyFee : pricing.urgentPhysicalCardPrice;
+      return request.resource.data.amount is number
+        && cardPrice is number
+        && (!request.resource.data.printRequested || printingPrice is number)
+        && (!request.resource.data.urgentProcessing || urgencyFee is number)
+        && request.resource.data.amount == cardPrice
+          + (request.resource.data.printRequested ? printingPrice : 0)
+          + (request.resource.data.urgentProcessing ? urgencyFee : 0)
+        && request.resource.data.currency == pricing.currency;
+    }
+
     function isClientDeliveryRoleNotification(notificationId) {
       let deliveryId = request.resource.data.deliveryId;
       let targetRole = request.resource.data.userId;
@@ -106,7 +121,8 @@ service cloud.firestore {
     // ==============================
     match /app_settings/{settingId} {
       allow read: if isSignedIn();
-      allow write: if isAdminGeneral();
+      allow write: if isAdminGeneral()
+        || (settingId == 'card_design' && getUserRole() == 'designer_graphique');
     }
 
     match /payment_settings/{settingId} {
@@ -229,7 +245,20 @@ service cloud.firestore {
         isChefAgence();
         
       // Création par le client
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.urgentProcessing is bool
+        && request.resource.data.printRequested is bool
+        && request.resource.data.status == 'pending'
+        && hasValidPurchasePrice()
+        && (
+          request.resource.data.urgentProcessing == true
+          || (
+            request.resource.data.identityRequired == true
+            && request.resource.data.identityProofUrl is string
+            && request.resource.data.identityProofUrl.size() > 0
+          )
+        );
       
       // Chef d'Agence peut modifier (approuver, rejeter)
       allow update: if isChefAgence();

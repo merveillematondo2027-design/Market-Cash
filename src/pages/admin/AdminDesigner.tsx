@@ -3,6 +3,8 @@ import { Download, Upload, Image as ImageIcon, Type, Save, QrCode, Trash2, Arrow
 import { useNavigate } from 'react-router-dom';
 import * as fabric from 'fabric';
 import toast from 'react-hot-toast';
+import { cardService } from '../../services/cardService';
+import { auth } from '../../firebase/config';
 
 interface DesignSettings {
   backgroundUrl: string | null;
@@ -47,7 +49,7 @@ export default function AdminDesigner() {
       const containerW = containerRef.current.clientWidth - 40;
       const scale = Math.min(1, containerW / CARD_WIDTH);
       setZoom(scale);
-      document.querySelector('.canvas-container')?.setAttribute('style', `transform: scale(${scale}); transform-origin: top left;`);
+      canvas.setDimensions({ width: CARD_WIDTH * scale, height: CARD_HEIGHT * scale }, { cssOnly: true });
     };
 
     fitToContainer();
@@ -99,6 +101,16 @@ export default function AdminDesigner() {
   const handleUploadBackground = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || !e.target.files[0] || !fbCanvas) return;
     const file = e.target.files[0];
+    if (!['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(file.type.toLowerCase())) {
+      toast.error('Format refusé : utilisez JPEG/JPG, PNG ou WebP.');
+      e.target.value = '';
+      return;
+    }
+    if (file.size > 12 * 1024 * 1024) {
+      toast.error("L'image dépasse la taille maximale de 12 Mo.");
+      e.target.value = '';
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (event) => {
       if (!event.target?.result) return;
@@ -121,12 +133,24 @@ export default function AdminDesigner() {
     setActiveObject(null);
   };
 
-  const saveDesign = () => {
+  const saveDesign = async () => {
     if (!fbCanvas) return;
-    const json = fbCanvas.toObject(['templateKey']);
-    // TODO: Save this JSON to Firestore global settings
-    localStorage.setItem('market_cash_card_design', JSON.stringify(json));
-    toast.success('Design sauvegardé avec succès !');
+    try {
+      const json = fbCanvas.toObject(['templateKey']);
+      const dataUrl = fbCanvas.toDataURL({ format: 'png', multiplier: 1 });
+      const blob = await (await fetch(dataUrl)).blob();
+      const file = new File([blob], `market-cash-design-${Date.now()}.png`, { type: 'image/png' });
+      const backgroundUrl = await cardService.uploadCardBackground(file);
+      await cardService.updateCardDesign({
+        backgroundUrl,
+        designJson: JSON.stringify(json),
+        userEmail: auth.currentUser?.email || 'designer_graphique'
+      });
+      toast.success('Design sauvegardé dans Firebase.');
+    } catch (error: any) {
+      console.error('[CARD_DESIGN_SAVE_ERROR]', { code: error?.code, message: error?.message });
+      toast.error("Impossible de sauvegarder le design.");
+    }
   };
 
   const changeColor = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -136,21 +160,21 @@ export default function AdminDesigner() {
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto h-[calc(100vh-100px)] flex flex-col">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-slate-900 to-indigo-950 p-6 rounded-[2rem] text-white shadow-xl shrink-0">
+    <div className="space-y-4 max-w-7xl mx-auto min-h-[calc(100vh-140px)] flex flex-col">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-blue-950 to-blue-800 p-5 rounded-3xl text-white shadow-xl shrink-0">
         <div className="flex items-center gap-4">
           <button onClick={() => navigate(-1)} className="p-2 bg-white/10 hover:bg-white/20 rounded-xl transition cursor-pointer">
             <ArrowLeft size={20} />
           </button>
           <div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center gap-2">
-              <ImageIcon size={28} className="text-pink-400" />
+              <ImageIcon size={28} className="text-amber-400" />
               Designer de Cartes
             </h1>
             <p className="text-sm text-slate-300">Créez le visuel des cartes virtuelles et physiques.</p>
           </div>
         </div>
-        <button onClick={saveDesign} className="bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white font-black py-3 px-6 rounded-xl flex items-center gap-2 shadow-lg shadow-pink-500/25 transition transform hover:scale-105 cursor-pointer">
+        <button onClick={saveDesign} className="bg-amber-400 hover:bg-amber-300 text-blue-950 font-black py-3 px-6 rounded-xl flex items-center gap-2 shadow-lg transition cursor-pointer">
           <Save size={18} />
           <span>Sauvegarder le design</span>
         </button>
@@ -168,7 +192,7 @@ export default function AdminDesigner() {
             >
               <Upload size={20} />
               <span className="text-xs font-bold text-center">Importer une image</span>
-              <input id="bg-upload" type="file" accept="image/*" className="hidden" onChange={handleUploadBackground} />
+              <input id="bg-upload" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" className="hidden" onChange={handleUploadBackground} />
             </div>
           </div>
 
@@ -228,9 +252,8 @@ export default function AdminDesigner() {
           </div>
 
           {/* Canvas Container */}
-          <div ref={containerRef} className="flex-1 overflow-auto p-4 sm:p-8 flex items-center justify-center bg-[#E5E7EB] bg-[linear-gradient(45deg,#d1d5db_25%,transparent_25%,transparent_75%,#d1d5db_75%,#d1d5db_100%),linear-gradient(45deg,#d1d5db_25%,transparent_25%,transparent_75%,#d1d5db_75%,#d1d5db_100%)] bg-[length:20px_20px] bg-[position:0_0,10px_10px]">
-            {/* The absolute positioning handles scaling centering via CSS if needed, but fabric handles it on the canvas element. We use transform for zoom. */}
-            <div className="shadow-2xl bg-white relative transition-transform" style={{ width: CARD_WIDTH, height: CARD_HEIGHT }}>
+          <div ref={containerRef} className="flex-1 min-h-[420px] overflow-hidden p-4 sm:p-8 flex items-center justify-center bg-[#E5E7EB] bg-[linear-gradient(45deg,#d1d5db_25%,transparent_25%,transparent_75%,#d1d5db_75%,#d1d5db_100%),linear-gradient(45deg,#d1d5db_25%,transparent_25%,transparent_75%,#d1d5db_75%,#d1d5db_100%)] bg-[length:20px_20px] bg-[position:0_0,10px_10px]">
+            <div className="shadow-2xl bg-white relative" style={{ width: CARD_WIDTH * zoom, height: CARD_HEIGHT * zoom }}>
               <canvas ref={canvasRef} />
             </div>
           </div>

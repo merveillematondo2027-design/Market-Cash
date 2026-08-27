@@ -192,7 +192,7 @@ export default function ClientHelp() {
         <div className="pt-2">
           <button
             onClick={contactSupport}
-            className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3.5 rounded-2xl font-black text-xs tracking-wider uppercase transition shadow-lg shadow-emerald-600/30 cursor-pointer active:scale-95"
+            className="fixed right-4 bottom-24 md:bottom-6 z-40 inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-3.5 rounded-full font-black text-xs transition shadow-xl cursor-pointer active:scale-95"
           >
             <MessageCircle size={16} />
             <span>Contacter le Support WhatsApp</span>

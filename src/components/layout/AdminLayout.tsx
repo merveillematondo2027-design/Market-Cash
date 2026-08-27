@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Package, Library, Truck, User, Shield } from 'lucide-react';
+import { LayoutDashboard, Library, Truck, User, Shield } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAuthStore } from '../../store/authStore';
 
@@ -9,16 +9,15 @@ export default function AdminLayout() {
 
   
   const navItems = [
-    { name: 'Tableau', fullName: 'Tableau de bord', path: '/admin/dashboard', icon: LayoutDashboard },
-    { name: 'Stock', fullName: 'Stock', path: '/admin/stock', icon: Package },
-    { name: 'Biliothèque', fullName: 'Bibliothèque', path: '/admin/library', icon: Library },
+    { name: 'Accueil', fullName: 'Accueil', path: '/admin/dashboard', icon: LayoutDashboard },
+    { name: 'Bibliothèque', fullName: 'Bibliothèque', path: '/admin/library', icon: Library },
     { name: 'Livraison', fullName: 'Livraison', path: '/admin/deliveries', icon: Truck },
     { name: 'Profil', fullName: 'Profil', path: '/admin/profile', icon: User },
   ];
 
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans text-slate-800 antialiased selection:bg-purple-600 selection:text-white">
+    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans text-slate-800 antialiased selection:bg-blue-600 selection:text-white">
       {/* Mobile Header */}
       <header className="md:hidden bg-blue-950 text-white px-4 py-3 flex justify-between items-center z-20 sticky top-0 shadow-md">
         <div className="flex items-center gap-2.5">
@@ -28,7 +27,7 @@ export default function AdminLayout() {
           <div>
             <div className="font-black text-sm tracking-tight text-white flex items-center gap-1.5">
               <span>MARKET-CASH</span>
-              <span className="text-[9px] bg-purple-600 text-white px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider">
+              <span className="text-[9px] bg-blue-700 text-white px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider">
                 Admin
               </span>
             </div>
@@ -50,7 +49,7 @@ export default function AdminLayout() {
               <h1 className="text-amber-400 text-xl font-black tracking-tight leading-none">
                 MARKET-CASH
               </h1>
-              <span className="text-[10px] text-purple-300 font-bold uppercase tracking-widest block mt-0.5">
+              <span className="text-[10px] text-blue-300 font-bold uppercase tracking-widest block mt-0.5">
                 Administration Générale
               </span>
             </div>
@@ -100,7 +99,7 @@ export default function AdminLayout() {
 
       {/* Mobile Bottom Nav - 3 primary modules */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200/90 px-4 py-2 z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
-        <div className="grid grid-cols-5 gap-1 max-w-lg mx-auto">
+        <div className="grid grid-cols-4 gap-1 max-w-lg mx-auto">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname.startsWith(item.path);

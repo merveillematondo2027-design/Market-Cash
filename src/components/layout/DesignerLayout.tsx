@@ -1,11 +1,12 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { Printer, Bell, User, Layers, LayoutDashboard, Library, Truck } from 'lucide-react';
+import { Printer, Bell, User, Palette } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 export default function DesignerLayout() {
   const location = useLocation();
 
   const navItems = [
+    { name: 'Studio graphique', path: '/designer/design', icon: Palette },
     { name: 'Impression PVC', path: '/designer/cards', icon: Printer },
     { name: 'Notifications', path: '/designer/notifications', icon: Bell },
     { name: 'Profil', path: '/designer/profile', icon: User },
