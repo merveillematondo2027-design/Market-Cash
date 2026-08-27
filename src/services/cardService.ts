@@ -196,10 +196,12 @@ export const cardService = {
           const data = snap.data();
           const vPrice = (typeof data.virtualCardPrice === 'number' && Number.isFinite(data.virtualCardPrice) && data.virtualCardPrice > 0) ? data.virtualCardPrice : null;
           const pPrice = (typeof data.physicalCardPrice === 'number' && Number.isFinite(data.physicalCardPrice) && data.physicalCardPrice > 0) ? data.physicalCardPrice : null;
+          const urgentPrice = (typeof data.urgentPhysicalCardPrice === 'number' && Number.isFinite(data.urgentPhysicalCardPrice) && data.urgentPhysicalCardPrice > 0) ? data.urgentPhysicalCardPrice : null;
           
           const result: CardPricingSettings = {
             virtualCardPrice: vPrice,
             physicalCardPrice: pPrice,
+            urgentPhysicalCardPrice: urgentPrice,
             currency: data.currency || 'USD',
             isFallback: false
           };
@@ -211,6 +213,7 @@ export const cardService = {
           const result: CardPricingSettings = {
             virtualCardPrice: 10,
             physicalCardPrice: 15,
+            urgentPhysicalCardPrice: 15,
             currency: 'USD',
             isFallback: false
           };
@@ -222,7 +225,7 @@ export const cardService = {
         return {
           virtualCardPrice: null,
           physicalCardPrice: null,
-  urgentPhysicalCardPrice: null,
+          urgentPhysicalCardPrice: null,
           currency: 'USD',
           isFallback: true
         };
@@ -244,9 +247,11 @@ export const cardService = {
         const data = snap.data();
         const vPrice = (typeof data.virtualCardPrice === 'number' && Number.isFinite(data.virtualCardPrice) && data.virtualCardPrice > 0) ? data.virtualCardPrice : null;
         const pPrice = (typeof data.physicalCardPrice === 'number' && Number.isFinite(data.physicalCardPrice) && data.physicalCardPrice > 0) ? data.physicalCardPrice : null;
+        const urgentPrice = (typeof data.urgentPhysicalCardPrice === 'number' && Number.isFinite(data.urgentPhysicalCardPrice) && data.urgentPhysicalCardPrice > 0) ? data.urgentPhysicalCardPrice : null;
         const res: CardPricingSettings = {
           virtualCardPrice: vPrice,
           physicalCardPrice: pPrice,
+          urgentPhysicalCardPrice: urgentPrice,
           currency: data.currency || 'USD',
           isFallback: false
         };
@@ -256,6 +261,7 @@ export const cardService = {
         const res: CardPricingSettings = {
           virtualCardPrice: 10,
           physicalCardPrice: 15,
+          urgentPhysicalCardPrice: 15,
           currency: 'USD',
           isFallback: false
         };
@@ -267,7 +273,7 @@ export const cardService = {
       callback({
         virtualCardPrice: null,
         physicalCardPrice: null,
-  urgentPhysicalCardPrice: null,
+        urgentPhysicalCardPrice: null,
         currency: 'USD',
         isFallback: true
       });
@@ -277,8 +283,12 @@ export const cardService = {
   /**
    * Updates card pricing in Firestore
    */
-  async updatePricing(params: { virtualCardPrice: number | null; physicalCardPrice: number | null;
-  urgentPhysicalCardPrice: number | null; currency?: string }): Promise<void> {
+  async updatePricing(params: {
+    virtualCardPrice: number | null;
+    physicalCardPrice: number | null;
+    urgentPhysicalCardPrice: number | null;
+    currency?: string;
+  }): Promise<void> {
     const docRef = doc(db, 'app_settings', 'card_pricing');
     const payload = {
       virtualCardPrice: (params.virtualCardPrice !== null && params.virtualCardPrice > 0) ? Number(params.virtualCardPrice) : null,

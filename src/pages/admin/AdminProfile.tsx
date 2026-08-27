@@ -5,7 +5,7 @@ import {  useAuthStore } from '../../store/authStore';
 import {  cardService, CardPricingSettings } from '../../services/cardService';
 import {  PaymentMethodItem } from '../../types';
 import {  
-  User, LogOut, Settings, DollarSign, CreditCard, Smartphone, Plus, Edit3, Trash2, Check, X, Save, ShieldCheck, HelpCircle, Bell, Palette, Sparkles, Server, Lock, ExternalLink, ChevronRight, AlertCircle, ToggleLeft, ToggleRight, Copy, Info, Image as ImageIcon } from 'lucide-react';
+  User, LogOut, Settings, DollarSign, CreditCard, Smartphone, Plus, Edit3, Trash2, Check, X, Save, ShieldCheck, HelpCircle, Bell, Palette, Sparkles, Server, Lock, ExternalLink, ChevronRight, AlertCircle, ToggleLeft, ToggleRight, Copy, Info, Activity, Image as ImageIcon } from 'lucide-react';
 import LogoutModal from '../../components/LogoutModal';
 import toast from 'react-hot-toast';
 
@@ -64,6 +64,7 @@ export default function AdminProfile() {
 
     const vPrice = virtualPriceInput.trim() ? parseFloat(virtualPriceInput) : null;
     const pPrice = physicalPriceInput.trim() ? parseFloat(physicalPriceInput) : null;
+    const urgentPrice = urgentPriceInput.trim() ? parseFloat(urgentPriceInput) : null;
 
     if (vPrice !== null && (isNaN(vPrice) || vPrice < 0)) {
       toast.error('Le prix de la carte virtuelle doit être un nombre positif ou vide.');
@@ -75,12 +76,17 @@ export default function AdminProfile() {
       return;
     }
 
+    if (urgentPrice !== null && (isNaN(urgentPrice) || urgentPrice < 0)) {
+      toast.error('Le prix de la carte physique urgente doit être un nombre positif ou vide.');
+      return;
+    }
+
     setSavingPricing(true);
     try {
       await cardService.updatePricing({
         virtualCardPrice: vPrice,
         physicalCardPrice: pPrice,
-        urgentPhysicalCardPrice: urgentPriceInput,
+        urgentPhysicalCardPrice: urgentPrice,
         currency: currencyInput.trim() || 'USD'
       });
       toast.success('Tarifs des cartes enregistrés avec succès dans Firestore !');

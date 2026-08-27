@@ -53,6 +53,15 @@ export default function ClientCards() {
   const [proofPreviewUrl, setProofPreviewUrl] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const selectedPhysicalPrice = physicalOption === 'urgent'
+    ? pricing.urgentPhysicalCardPrice
+    : physicalOption === 'normal'
+      ? pricing.physicalCardPrice
+      : 0;
+  const actualPrice = pricing.virtualCardPrice !== null && selectedPhysicalPrice !== null
+    ? pricing.virtualCardPrice + selectedPhysicalPrice
+    : null;
+
   // Cards Reveal Security State
   const [revealedCards, setRevealedCards] = useState<Record<string, boolean>>({});
   const [pendingCardToReveal, setPendingCardToReveal] = useState<string | null>(null);
@@ -515,8 +524,7 @@ export default function ClientCards() {
       return;
     }
 
-    const 0 /* fix actualPrice */ = (pricing.virtualCardPrice || 0) + (physicalOption === 'urgent' ? (pricing.urgentPhysicalCardPrice || 0) : (physicalOption === 'normal' ? (pricing.physicalCardPrice || 0) : 0));
-    if (0 /* fix actualPrice */ === null || 0 /* fix actualPrice */ <= 0 || !Number.isFinite(0 /* fix actualPrice */)) {
+    if (actualPrice === null || actualPrice <= 0 || !Number.isFinite(actualPrice)) {
       toast.error("Cette carte n'est momentanément pas disponible à l'achat car son tarif n'est pas configuré. Veuillez contacter l'équipe.");
       return;
     }
@@ -594,7 +602,7 @@ export default function ClientCards() {
         cardType: 'virtual',
         physicalOption: physicalOption,
         cardName: cardTitle,
-        amount: 0 /* fix actualPrice */,
+        amount: actualPrice,
         currency: pricing.currency || 'USD',
         paymentMethod: 'Non spécifié',
         transactionReference: 'Non spécifié',
@@ -1251,7 +1259,7 @@ export default function ClientCards() {
                       </span>
                     </div>
                     <span className="text-2xl sm:text-3xl font-black text-emerald-400">
-                      {`${0 /* fix actualPrice */} ${pricing.currency}`}
+                      {`${actualPrice ?? 0} ${pricing.currency}`}
                     </span>
                   </div>
 
@@ -1460,7 +1468,7 @@ export default function ClientCards() {
                       Demande enregistrée avec succès !
                     </h4>
                     <p className="text-slate-600 text-sm font-medium leading-relaxed">
-                      Votre demande pour une <strong className="text-slate-800">{'' /* fix selectedCardType */ === 'virtual' ? 'Carte Virtuelle' : 'Carte Physique'} Market-Cash</strong> est actuellement en cours de traitement et de vérification par un Administrateur Général.
+                      Votre demande pour une <strong className="text-slate-800">{physicalOption === 'none' ? 'Carte Virtuelle' : 'Carte Physique'} Market-Cash</strong> est actuellement en cours de traitement et de vérification par un Administrateur Général.
                     </p>
                   </div>
 

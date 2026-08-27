@@ -123,7 +123,7 @@ export default function AdminDesigner() {
 
   const saveDesign = () => {
     if (!fbCanvas) return;
-    const json = fbCanvas.toJSON(['templateKey']);
+    const json = fbCanvas.toObject(['templateKey']);
     // TODO: Save this JSON to Firestore global settings
     localStorage.setItem('market_cash_card_design', JSON.stringify(json));
     toast.success('Design sauvegardé avec succès !');
