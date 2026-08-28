@@ -403,66 +403,8 @@ export default function AgencyCards() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Numéro de Carte
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={saleForm.cardNumber}
-                    onChange={(e) => setSaleForm({ ...saleForm, cardNumber: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Code CVV
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={4}
-                    value={saleForm.cvv}
-                    onChange={(e) => setSaleForm({ ...saleForm, cvv: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Validité (Début / Fin)
-                  </label>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="text"
-                      value={saleForm.expiryStart}
-                      onChange={(e) => setSaleForm({ ...saleForm, expiryStart: e.target.value })}
-                      className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-center"
-                    />
-                    <span className="text-slate-400 text-xs">/</span>
-                    <input
-                      type="text"
-                      value={saleForm.expiryEnd}
-                      onChange={(e) => setSaleForm({ ...saleForm, expiryEnd: e.target.value })}
-                      className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-center"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    N° de Recharge
-                  </label>
-                  <input
-                    type="text"
-                    value={saleForm.rechargeNumber}
-                    onChange={(e) => setSaleForm({ ...saleForm, rechargeNumber: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono"
-                  />
-                </div>
+              <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-xs text-blue-900">
+                La carte, son numéro, sa validité, son CVV et son numéro de recharge proviennent exclusivement du stock préconfiguré. La même carte sera transmise à l’atelier PVC.
               </div>
 
               <div className="flex gap-2 pt-2">

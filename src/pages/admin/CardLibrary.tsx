@@ -60,13 +60,7 @@ export default function CardLibrary() {
     userId: '',
     clientName: '',
     clientEmail: '',
-    cardNumber: '',
-    cardHolder: '',
-    expiryStart: '02/27',
-    expiryEnd: '08/27',
-    cvv: '551',
-    rechargeNumber: '',
-    network: 'visa' as const
+    cardHolder: ''
   });
 
   useEffect(() => {
@@ -125,9 +119,9 @@ export default function CardLibrary() {
 
     // 2. Tab Filter
     if (activeFilter === 'SOLD') {
-      if (card.saleStatus !== 'confirmed') return false;
+      if (!['sold', 'confirmed'].includes(card.saleStatus || '')) return false;
     } else if (activeFilter === 'TO_PRINT') {
-      if (card.saleStatus !== 'confirmed' || card.printStatus === 'printed') return false;
+      if (!['sold', 'confirmed'].includes(card.saleStatus || '') || card.printStatus === 'printed') return false;
     } else if (activeFilter === 'PRINTED') {
       if (card.printStatus !== 'printed') return false;
     }
@@ -186,7 +180,7 @@ export default function CardLibrary() {
   const handleDirectSaleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
-    if (!saleForm.userId || !saleForm.cardNumber || !saleForm.cardHolder) {
+    if (!saleForm.userId || !saleForm.cardHolder) {
       toast.error('Veuillez renseigner tous les champs obligatoires.');
       return;
     }
@@ -194,24 +188,14 @@ export default function CardLibrary() {
     setIsProcessing(true);
     try {
       const selectedClient = clients.find(c => c.uid === saleForm.userId);
-      const newCard = await cardService.confirmAndIssuePhysicalCard({
+      const newCard = await cardService.assignAvailableCardToClient({
         userId: saleForm.userId,
         userName: selectedClient?.displayName || saleForm.cardHolder,
         userEmail: selectedClient?.email || saleForm.clientEmail,
-        cardNumber: saleForm.cardNumber,
-        cardHolder: saleForm.cardHolder,
-        expiryStart: saleForm.expiryStart,
-        expiryEnd: saleForm.expiryEnd,
-        cvv: saleForm.cvv,
-        rechargeNumber: saleForm.rechargeNumber,
-        network: saleForm.network,
-        seller: {
-          uid: user.uid,
-          email: user.email,
-          role: user.role,
-          agencyId: user.agencyId || 'SIEGE_CENTRAL',
-          agencyName: user.agencyName || (user.role === 'chef_agence' ? 'Agence Régionale' : 'Siège Central Market-Cash')
-        }
+        assignedBy: user.email,
+        agencyId: user.agencyId || 'SIEGE_CENTRAL',
+        agencyName: user.agencyName || (user.role === 'chef_agence' ? 'Agence Régionale' : 'Siège Central Market-Cash'),
+        printRequested: true
       });
 
       toast.success(`Vente confirmée ! Carte ${newCard.cardIdentifier} ajoutée à la bibliothèque.`);
@@ -220,17 +204,11 @@ export default function CardLibrary() {
         userId: '',
         clientName: '',
         clientEmail: '',
-        cardNumber: '',
-        cardHolder: '',
-        expiryStart: '02/27',
-        expiryEnd: '08/27',
-        cvv: '551',
-        rechargeNumber: '',
-        network: 'visa'
+        cardHolder: ''
       });
     } catch (error: any) {
       console.error('[DIRECT_SALE_ERROR]', error);
-      toast.error("Erreur lors de la confirmation de vente.");
+      toast.error(error?.message === 'STOCK_EMPTY' ? 'Stock épuisé : aucune carte préconfigurée disponible.' : "Erreur lors de la confirmation de vente.");
     } finally {
       setIsProcessing(false);
     }
@@ -239,8 +217,8 @@ export default function CardLibrary() {
   // Helper counts
   const counts = {
     all: cards.length,
-    sold: cards.filter(c => c.saleStatus === 'confirmed').length,
-    toPrint: cards.filter(c => c.saleStatus === 'confirmed' && c.printStatus !== 'printed').length,
+    sold: cards.filter(c => ['sold', 'confirmed'].includes(c.saleStatus || '')).length,
+    toPrint: cards.filter(c => ['sold', 'confirmed'].includes(c.saleStatus || '') && c.printStatus !== 'printed').length,
     printed: cards.filter(c => c.printStatus === 'printed').length
   };
 
@@ -587,8 +565,8 @@ export default function CardLibrary() {
                 <Plus size={24} />
               </div>
               <div>
-                <h3 className="text-xl font-black text-slate-800">Vente Directe de Carte Physique</h3>
-                <p className="text-xs text-slate-500 font-medium">Génère automatiquement l'identifiant MC-001-YYYYMMDD et le fichier PVC</p>
+                <h3 className="text-xl font-black text-slate-800">Attribution directe avec impression</h3>
+                <p className="text-xs text-slate-500 font-medium">Utilise une carte préconfigurée du stock unique et prépare son fichier PVC</p>
               </div>
             </div>
 
@@ -638,65 +616,8 @@ export default function CardLibrary() {
                 />
               </div>
 
-              {/* Card Number */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Numéro de Carte (16 chiffres) <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  maxLength={19}
-                  placeholder="4585 0200 0025 8400"
-                  value={saleForm.cardNumber}
-                  onChange={(e) => setSaleForm({ ...saleForm, cardNumber: e.target.value })}
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-
-              {/* Expiry & CVV */}
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Début (MM/AA)</label>
-                  <input
-                    type="text"
-                    value={saleForm.expiryStart}
-                    onChange={(e) => setSaleForm({ ...saleForm, expiryStart: e.target.value })}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-center"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Fin (MM/AA)</label>
-                  <input
-                    type="text"
-                    value={saleForm.expiryEnd}
-                    onChange={(e) => setSaleForm({ ...saleForm, expiryEnd: e.target.value })}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-center"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">CVV</label>
-                  <input
-                    type="text"
-                    value={saleForm.cvv}
-                    onChange={(e) => setSaleForm({ ...saleForm, cvv: e.target.value })}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-center"
-                  />
-                </div>
-              </div>
-
-              {/* Recharge Number */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Numéro de Recharge (Attribué par l'Admin)
-                </label>
-                <input
-                  type="text"
-                  placeholder="RC-0284-9912"
-                  value={saleForm.rechargeNumber}
-                  onChange={(e) => setSaleForm({ ...saleForm, rechargeNumber: e.target.value })}
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold focus:ring-2 focus:ring-blue-500 outline-none"
-                />
+              <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-xs text-blue-900">
+                Le numéro, le CVV, la validité et le numéro de recharge proviennent d’une carte préconfigurée disponible. Cette attribution ne crée aucune seconde carte.
               </div>
 
               {/* Submit Buttons */}
@@ -714,7 +635,7 @@ export default function CardLibrary() {
                   className="px-6 py-3 bg-blue-900 hover:bg-blue-950 text-amber-400 font-black rounded-2xl text-xs shadow-lg shadow-blue-950/20 transition cursor-pointer disabled:opacity-50 flex items-center gap-2"
                 >
                   <Sparkles size={16} />
-                  <span>{isProcessing ? 'Génération en cours...' : 'Confirmer Vente & Générer PVC'}</span>
+                  <span>{isProcessing ? 'Attribution en cours...' : 'Attribuer & préparer le PVC'}</span>
                 </button>
               </div>
             </form>
