@@ -1,397 +1,166 @@
-import React, { useState, useEffect } from 'react';
-import { collection, getDocs, query, orderBy, doc, updateDoc, deleteField } from 'firebase/firestore';
+import React, { useEffect, useMemo, useState } from 'react';
+import { collection, deleteField, doc, getDocs, orderBy, query, updateDoc, where } from 'firebase/firestore';
+import { useSearchParams } from 'react-router-dom';
 import { db } from '../../firebase/config';
-import { User, UserRole } from '../../types';
+import { AppLog, CardPurchaseRequest, PhysicalCardRequest, User, UserCard, UserRole } from '../../types';
 import { useAuthStore } from '../../store/authStore';
-import { cleanFirestoreData } from '../../lib/firestoreUtils';
+import { logService } from '../../services/logService';
 import toast from 'react-hot-toast';
-import { 
-  User as UserIcon, 
-  Shield, 
-  Building, 
-  Printer, 
-  Truck, 
-  Edit3, 
-  X,
-  Search,
-  Mail,
-  Phone
-} from 'lucide-react';
+import { CreditCard, Edit3, FileText, Search, Shield, Truck, User as UserIcon, X } from 'lucide-react';
+
+type Tab = 'summary' | 'cards' | 'requests' | 'deliveries' | 'history' | 'security';
+const fmt = (value?: number) => value ? new Date(value).toLocaleString('fr-FR') : '—';
 
 export default function AdminUsers() {
   const { user: currentUser } = useAuthStore();
+  const [params, setParams] = useSearchParams();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  
-  // Edit Role Modal
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [tab, setTab] = useState<Tab>('summary');
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [cards, setCards] = useState<UserCard[]>([]);
+  const [requests, setRequests] = useState<CardPurchaseRequest[]>([]);
+  const [deliveries, setDeliveries] = useState<PhysicalCardRequest[]>([]);
+  const [logs, setLogs] = useState<AppLog[]>([]);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [selectedRole, setSelectedRole] = useState<UserRole>('client');
   const [agencyName, setAgencyName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
-  useEffect(() => {
-    loadUsers();
-  }, []);
+  useEffect(() => { void loadUsers(); }, []);
 
-  const loadUsers = async () => {
+  async function loadUsers() {
+    setLoading(true);
     try {
-      const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
-      const snap = await getDocs(q);
-      setUsers(snap.docs.map(d => d.data() as User));
+      const snap = await getDocs(query(collection(db, 'users'), orderBy('createdAt', 'desc')));
+      const list = snap.docs.map(d => ({ ...d.data(), uid: d.id } as User));
+      setUsers(list);
+      const requestedUid = params.get('uid');
+      if (requestedUid && !selectedUser) {
+        const found = list.find(u => u.uid === requestedUid);
+        if (found) void openUser(found, false);
+      }
     } catch (error) {
       console.error('[ADMIN_LOAD_USERS_ERROR]', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleOpenEdit = (targetUser: User) => {
-    if (currentUser?.role !== 'admin_general') {
-      toast.error('Seul un Administrateur Général peut modifier les rôles.');
-      return;
-    }
-    setEditingUser(targetUser);
-    setSelectedRole(targetUser.role || 'client');
-    setAgencyName(targetUser.agencyName || targetUser.agencyId || '');
-  };
-
-  const handleSaveRole = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingUser || currentUser?.role !== 'admin_general') return;
-
-    // Validation for roles that mandate an agency
-    if ((selectedRole === 'chef_agence' || selectedRole === 'livreur') && !agencyName.trim()) {
-      toast.error("L'agence est obligatoire pour un Chef d'Agence et un Livreur.");
-      return;
-    }
-
-    setIsSaving(true);
-    try {
-      console.log(`[ROLE_UPDATE] uid=${editingUser.uid} oldRole=${editingUser.role} newRole=${selectedRole}`);
-
-      const userRef = doc(db, 'users', editingUser.uid);
-      
-      const rawUpdates: Record<string, any> = {
-        role: selectedRole,
-        updatedAt: Date.now()
-      };
-
-      if (selectedRole === 'chef_agence' || selectedRole === 'livreur') {
-        rawUpdates.agencyId = agencyName.trim();
-        rawUpdates.agencyName = agencyName.trim();
-      } else if (selectedRole === 'designer_graphique') {
-        if (agencyName.trim()) {
-          rawUpdates.agencyId = agencyName.trim();
-          rawUpdates.agencyName = agencyName.trim();
-        } else {
-          rawUpdates.agencyId = deleteField();
-          rawUpdates.agencyName = deleteField();
-        }
-      } else {
-        // For client or admin_general, remove agency fields
-        rawUpdates.agencyId = deleteField();
-        rawUpdates.agencyName = deleteField();
-      }
-
-      await updateDoc(userRef, rawUpdates);
-
-      toast.success(`Rôle de ${editingUser.displayName || editingUser.email} mis à jour : ${selectedRole}`);
-      setEditingUser(null);
-      loadUsers();
-    } catch (err: any) {
-      console.error('[UPDATE_ROLE_ERROR]', err);
-      toast.error('Erreur lors de la modification du rôle.');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const getRoleBadge = (role: UserRole) => {
-    switch (role) {
-      case 'admin_general':
-        return (
-          <span className="px-2.5 py-1 rounded-xl text-[11px] sm:text-xs font-black bg-purple-100 text-purple-800 border border-purple-200 flex items-center gap-1.5 w-fit">
-            <Shield size={12} className="text-purple-600 shrink-0" />
-            Admin Général
-          </span>
-        );
-      case 'chef_agence':
-        return (
-          <span className="px-2.5 py-1 rounded-xl text-[11px] sm:text-xs font-black bg-blue-100 text-blue-800 border border-blue-200 flex items-center gap-1.5 w-fit">
-            <Building size={12} className="text-blue-600 shrink-0" />
-            Chef d'Agence
-          </span>
-        );
-      case 'designer_graphique':
-        return (
-          <span className="px-2.5 py-1 rounded-xl text-[11px] sm:text-xs font-black bg-amber-100 text-amber-900 border border-amber-200 flex items-center gap-1.5 w-fit">
-            <Printer size={12} className="text-amber-600 shrink-0" />
-            Designer Graphique
-          </span>
-        );
-      case 'livreur':
-        return (
-          <span className="px-2.5 py-1 rounded-xl text-[11px] sm:text-xs font-black bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1.5 w-fit">
-            <Truck size={12} className="text-emerald-600 shrink-0" />
-            Livreur
-          </span>
-        );
-      default:
-        return (
-          <span className="px-2.5 py-1 rounded-xl text-[11px] sm:text-xs font-bold bg-slate-100 text-slate-700 w-fit">
-            Client
-          </span>
-        );
-    }
-  };
-
-  const filteredUsers = users.filter(u => {
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      (u.displayName || '').toLowerCase().includes(q) ||
-      (u.email || '').toLowerCase().includes(q) ||
-      (u.phone || '').includes(q) ||
-      (u.role || '').toLowerCase().includes(q) ||
-      (u.agencyName || '').toLowerCase().includes(q)
-    );
-  });
-
-  if (loading) {
-    return (
-      <div className="p-8 text-center text-slate-500 font-bold">
-        <div className="w-10 h-10 border-4 border-blue-950 border-t-amber-400 rounded-full animate-spin mx-auto mb-3"></div>
-        Chargement des utilisateurs...
-      </div>
-    );
+      toast.error('Impossible de charger les utilisateurs.');
+    } finally { setLoading(false); }
   }
 
-  return (
-    <div className="space-y-4 sm:space-y-6 pb-20 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-black text-slate-800 tracking-tight">Utilisateurs & Rôles</h1>
-          <p className="text-xs text-slate-500 font-medium">Attribution des responsabilités système RBAC Market-Cash</p>
-        </div>
+  async function openUser(target: User, updateUrl = true) {
+    setSelectedUser(target);
+    setTab('summary');
+    setDetailLoading(true);
+    if (updateUrl) setParams({ uid: target.uid }, { replace: true });
+    logService.audit('CLIENT_PROFILE_VIEWED', 'Dossier client consulté', {
+      targetType: 'user', targetId: target.uid, targetUserId: target.uid, targetRole: target.role
+    });
 
-        {/* Search */}
-        <div className="relative w-full sm:w-72">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Rechercher utilisateur, rôle..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-none shadow-xs"
-          />
-        </div>
-      </div>
+    try {
+      const [cardSnap, requestSnap, deliverySnap, ownLogsSnap] = await Promise.all([
+        getDocs(query(collection(db, 'cards'), where('userId', '==', target.uid))),
+        getDocs(query(collection(db, 'card_purchase_requests'), where('userId', '==', target.uid))),
+        getDocs(query(collection(db, 'physical_card_requests'), where('userId', '==', target.uid))),
+        getDocs(query(collection(db, 'appLogs'), where('userId', '==', target.uid)))
+      ]);
+      setCards(cardSnap.docs.map(d => ({ ...d.data(), id: d.id } as UserCard)));
+      setRequests(requestSnap.docs.map(d => ({ ...d.data(), id: d.id } as CardPurchaseRequest)).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)));
+      setDeliveries(deliverySnap.docs.map(d => ({ ...d.data(), id: d.id } as PhysicalCardRequest)).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)));
+      setLogs(ownLogsSnap.docs.map(d => ({ ...d.data(), id: d.id } as AppLog)).sort((a,b)=>b.timestamp-a.timestamp));
+    } catch (error) {
+      console.error('[CLIENT_DOSSIER_LOAD_ERROR]', error);
+      toast.error('Le dossier est ouvert, mais certaines données ne sont pas accessibles.');
+    } finally { setDetailLoading(false); }
+  }
 
-      {/* MOBILE LIST VIEW (< sm) */}
-      <div className="sm:hidden space-y-3">
-        {filteredUsers.length === 0 ? (
-          <div className="p-8 text-center text-slate-400 font-medium text-xs bg-white rounded-2xl border border-slate-100">
-            Aucun utilisateur trouvé
-          </div>
-        ) : (
-          filteredUsers.map(u => (
-            <div key={u.uid} className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs space-y-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 overflow-hidden shrink-0">
-                    {u.avatar ? <img src={u.avatar} alt={u.displayName} className="w-full h-full object-cover" /> : <UserIcon size={18} />}
-                  </div>
-                  <div>
-                    <div className="font-bold text-slate-900 text-xs leading-tight">{u.displayName || 'Sans nom'}</div>
-                    <div className="text-[10px] text-slate-400 font-mono">UID: {u.uid.substring(0, 8)}...</div>
-                  </div>
-                </div>
-                {getRoleBadge(u.role)}
-              </div>
+  function closeUser() {
+    setSelectedUser(null);
+    setParams({}, { replace: true });
+  }
 
-              <div className="bg-slate-50 rounded-xl p-2.5 space-y-1 text-xs text-slate-600">
-                <div className="flex items-center gap-2 truncate">
-                  <Mail size={12} className="text-slate-400 shrink-0" />
-                  <span className="truncate">{u.email}</span>
-                </div>
-                {u.phone && (
-                  <div className="flex items-center gap-2">
-                    <Phone size={12} className="text-slate-400 shrink-0" />
-                    <span>{u.phone}</span>
-                  </div>
-                )}
-                {(u.agencyName || u.agencyId) && (
-                  <div className="flex items-center gap-2 text-blue-700 font-semibold pt-1 border-t border-slate-200/60">
-                    <Building size={12} className="text-blue-500 shrink-0" />
-                    <span className="truncate">{u.agencyName || u.agencyId}</span>
-                  </div>
-                )}
-              </div>
+  function editRole(target: User) {
+    if (currentUser?.role !== 'admin_general') return toast.error('Seul l’Administrateur Général peut modifier les rôles.');
+    setEditingUser(target);
+    setSelectedRole(target.role);
+    setAgencyName(target.agencyName || target.agencyId || '');
+  }
 
-              {currentUser?.role === 'admin_general' && (
-                <button
-                  onClick={() => handleOpenEdit(u)}
-                  className="w-full py-2 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer touch-manipulation"
-                >
-                  <Edit3 size={13} />
-                  <span>Modifier Rôle & Agence</span>
-                </button>
-              )}
-            </div>
-          ))
-        )}
-      </div>
-      
-      {/* DESKTOP TABLE VIEW (>= sm) */}
-      <div className="hidden sm:block bg-white rounded-3xl border border-slate-200/80 overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-600">
-            <thead className="bg-slate-50 text-slate-800 border-b border-slate-200">
-              <tr>
-                <th className="p-3.5 font-bold uppercase tracking-wider">Utilisateur</th>
-                <th className="p-3.5 font-bold uppercase tracking-wider">Contact</th>
-                <th className="p-3.5 font-bold uppercase tracking-wider">Rôle Attribué</th>
-                <th className="p-3.5 font-bold uppercase tracking-wider">Agence / Secteur</th>
-                <th className="p-3.5 font-bold uppercase tracking-wider">Date Inscription</th>
-                <th className="p-3.5 font-bold uppercase tracking-wider text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredUsers.map(u => (
-                <tr key={u.uid} className="hover:bg-slate-50 transition">
-                  <td className="p-3.5 flex items-center space-x-3">
-                    <div className="w-9 h-9 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 overflow-hidden shrink-0">
-                      {u.avatar ? <img src={u.avatar} alt={u.displayName} className="w-full h-full object-cover" /> : <UserIcon size={18} />}
-                    </div>
-                    <div>
-                      <div className="font-bold text-slate-900">{u.displayName || 'Sans nom'}</div>
-                      <div className="text-[10px] text-slate-400 font-mono">UID: {u.uid.substring(0, 8)}...</div>
-                    </div>
-                  </td>
-                  <td className="p-3.5">
-                    <div className="font-medium text-slate-800">{u.email}</div>
-                    <div className="text-[11px] text-slate-500 font-mono">{u.phone || 'Non renseigné'}</div>
-                  </td>
-                  <td className="p-3.5">
-                    {getRoleBadge(u.role)}
-                  </td>
-                  <td className="p-3.5 font-semibold text-slate-700">
-                    {u.agencyName || u.agencyId || '—'}
-                  </td>
-                  <td className="p-3.5 font-medium text-slate-500">
-                    {new Date(u.createdAt).toLocaleDateString('fr-FR')}
-                  </td>
-                  <td className="p-3.5 text-right">
-                    {currentUser?.role === 'admin_general' && (
-                      <button
-                        onClick={() => handleOpenEdit(u)}
-                        className="px-3 py-1.5 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 rounded-xl font-bold text-xs flex items-center gap-1.5 ml-auto transition cursor-pointer"
-                      >
-                        <Edit3 size={13} />
-                        <span>Modifier Rôle</span>
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+  async function saveRole(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingUser || currentUser?.role !== 'admin_general' || isSaving) return;
+    if ((selectedRole === 'chef_agence' || selectedRole === 'livreur') && !agencyName.trim()) return toast.error('L’agence est obligatoire pour ce rôle.');
+    setIsSaving(true);
+    try {
+      const updates: Record<string, unknown> = { role: selectedRole, updatedAt: Date.now() };
+      if (selectedRole === 'chef_agence' || selectedRole === 'livreur' || (selectedRole === 'designer_graphique' && agencyName.trim())) {
+        updates.agencyId = agencyName.trim();
+        updates.agencyName = agencyName.trim();
+      } else {
+        updates.agencyId = deleteField();
+        updates.agencyName = deleteField();
+      }
+      await updateDoc(doc(db, 'users', editingUser.uid), updates);
+      logService.audit('USER_ROLE_CHANGED', 'Rôle utilisateur modifié', {
+        targetType: 'user', targetId: editingUser.uid, targetUserId: editingUser.uid,
+        oldRole: editingUser.role, newRole: selectedRole, success: true
+      });
+      toast.success('Rôle mis à jour.');
+      setEditingUser(null);
+      await loadUsers();
+    } catch (error) {
+      console.error('[UPDATE_ROLE_ERROR]', error);
+      toast.error('Modification du rôle impossible.');
+    } finally { setIsSaving(false); }
+  }
 
-      {/* EDIT ROLE MODAL */}
-      {editingUser && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-          <div className="bg-white w-full max-w-md rounded-3xl p-5 sm:p-7 shadow-2xl border border-slate-200 relative space-y-4 animate-in fade-in zoom-in-95 my-auto">
-            <button
-              onClick={() => setEditingUser(null)}
-              className="absolute top-4 right-4 p-1.5 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-600 transition cursor-pointer"
-            >
-              <X size={18} />
-            </button>
+  const filtered = useMemo(() => users.filter(u => {
+    const q = searchQuery.trim().toLowerCase();
+    return !q || [u.displayName, u.email, u.phone, u.role, u.agencyName].some(v => String(v || '').toLowerCase().includes(q));
+  }), [users, searchQuery]);
 
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
-                <Shield size={20} />
-              </div>
-              <div className="min-w-0 pr-6">
-                <h3 className="text-base sm:text-lg font-black text-slate-900 truncate">Permissions & Rôle</h3>
-                <p className="text-xs text-slate-500 font-medium truncate">{editingUser.displayName || editingUser.email}</p>
-              </div>
-            </div>
+  if (loading) return <div className="p-8 text-center font-bold text-slate-500">Chargement des utilisateurs...</div>;
 
-            <form onSubmit={handleSaveRole} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Rôle / Responsabilité Système
-                </label>
-                <select
-                  value={selectedRole}
-                  onChange={(e) => setSelectedRole(e.target.value as UserRole)}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-purple-500 outline-none cursor-pointer"
-                >
-                  <option value="client">Client (Standard)</option>
-                  <option value="chef_agence">Chef d'Agence (Gestion locale)</option>
-                  <option value="designer_graphique">Designer Graphique (Impression PVC)</option>
-                  <option value="livreur">Livreur (Tournées & Courses)</option>
-                  <option value="admin_general">Admin Général (Accès Total)</option>
-                </select>
-              </div>
-
-              {(selectedRole === 'chef_agence' || selectedRole === 'livreur') && (
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Nom de l'Agence / Secteur <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ex: Agence Kinshasa Nord"
-                    value={agencyName}
-                    onChange={(e) => setAgencyName(e.target.value)}
-                    required
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
-                  />
-                  <p className="text-[10px] text-slate-500 mt-1">Obligatoire pour les chefs d'agence et livreurs.</p>
-                </div>
-              )}
-
-              {selectedRole === 'designer_graphique' && (
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Agence ou Atelier (Optionnel)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ex: Atelier Central"
-                    value={agencyName}
-                    onChange={(e) => setAgencyName(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-amber-500 outline-none"
-                  />
-                </div>
-              )}
-
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingUser(null)}
-                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSaving}
-                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-black rounded-xl text-xs transition cursor-pointer disabled:opacity-50"
-                >
-                  {isSaving ? 'Enregistrement...' : 'Enregistrer le rôle'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+  return <div className="max-w-7xl mx-auto space-y-4 pb-24 px-1 sm:px-0">
+    <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+      <div><h1 className="text-xl sm:text-2xl font-black text-blue-950">Clients & Utilisateurs</h1><p className="text-xs text-slate-500">Touchez un nom pour ouvrir le dossier complet du client.</p></div>
+      <div className="relative sm:w-80"><Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="Nom, email, téléphone, rôle..." className="w-full pl-9 pr-3 py-2.5 rounded-xl border bg-white text-sm outline-none focus:border-blue-500"/></div>
     </div>
-  );
+
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2"><Stat label="Utilisateurs" value={users.length}/><Stat label="Clients" value={users.filter(u=>u.role==='client').length}/><Stat label="Personnel" value={users.filter(u=>u.role!=='client').length}/><Stat label="Agences" value={new Set(users.map(u=>u.agencyId).filter(Boolean)).size}/></div>
+
+    <div className="sm:hidden space-y-2.5">
+      {filtered.map(u => <button key={u.uid} onClick={()=>void openUser(u)} className="w-full text-left bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+        <div className="flex items-start gap-3"><Avatar user={u}/><div className="min-w-0 flex-1"><div className="font-black text-blue-800 text-sm break-words">{u.displayName||'Sans nom'}</div><div className="text-xs text-slate-500 truncate mt-0.5">{u.email}</div><div className="text-[11px] text-slate-400 mt-1">{u.phone||'Téléphone non renseigné'}</div></div><RoleBadge role={u.role}/></div>
+        <div className="mt-3 flex justify-between text-[10px] text-slate-400"><span>{new Date(u.createdAt).toLocaleDateString('fr-FR')}</span><span className="font-black text-blue-700">Ouvrir dossier →</span></div>
+      </button>)}
+      {!filtered.length && <div className="p-10 text-center bg-white border rounded-2xl text-slate-400">Aucun utilisateur trouvé.</div>}
+    </div>
+
+    <div className="hidden sm:block bg-white border rounded-2xl overflow-hidden"><table className="w-full text-left text-xs"><thead className="bg-slate-50 text-slate-500 uppercase"><tr><th className="p-3">Utilisateur</th><th className="p-3">Contact</th><th className="p-3">Rôle</th><th className="p-3">Agence</th><th className="p-3">Inscription</th><th className="p-3 text-right">Action</th></tr></thead><tbody className="divide-y divide-slate-100">{filtered.map(u=><tr key={u.uid}><td className="p-3"><button onClick={()=>void openUser(u)} className="flex items-center gap-2 text-left"><Avatar user={u}/><span className="font-black text-blue-800 hover:underline">{u.displayName||'Sans nom'}</span></button></td><td className="p-3"><div>{u.email}</div><div className="text-slate-400">{u.phone||'—'}</div></td><td className="p-3"><RoleBadge role={u.role}/></td><td className="p-3">{u.agencyName||u.agencyId||'—'}</td><td className="p-3">{new Date(u.createdAt).toLocaleDateString('fr-FR')}</td><td className="p-3 text-right"><button onClick={()=>void openUser(u)} className="px-3 py-2 rounded-lg bg-blue-950 text-white font-black">Ouvrir</button></td></tr>)}</tbody></table></div>
+
+    {selectedUser && <div className="fixed inset-0 z-50 bg-slate-950/70 p-2 sm:p-5 flex items-center justify-center" onMouseDown={e=>{if(e.target===e.currentTarget)closeUser()}}><div className="w-full max-w-5xl max-h-[94vh] bg-slate-50 rounded-3xl shadow-2xl overflow-hidden flex flex-col">
+      <div className="bg-blue-950 text-white p-4 flex justify-between gap-3"><div className="flex gap-3 min-w-0"><Avatar user={selectedUser} large/><div className="min-w-0"><h2 className="text-lg font-black truncate">{selectedUser.displayName||'Client Market-Cash'}</h2><div className="text-xs text-blue-200 truncate">{selectedUser.email}</div><div className="text-[9px] text-blue-300 font-mono mt-1 truncate">UID {selectedUser.uid}</div></div></div><button onClick={closeUser} className="p-2 rounded-full bg-white/10 shrink-0"><X size={18}/></button></div>
+      <div className="bg-white border-b p-2 flex gap-1 overflow-x-auto">{(['summary','cards','requests','deliveries','history','security'] as Tab[]).map(t=><button key={t} onClick={()=>setTab(t)} className={`px-3 py-2 rounded-xl text-[11px] font-black whitespace-nowrap ${tab===t?'bg-amber-400 text-blue-950':'text-slate-500'}`}>{({summary:'Résumé',cards:'Cartes',requests:'Demandes',deliveries:'Livraisons',history:'Historique',security:'Sécurité'} as Record<Tab,string>)[t]}</button>)}</div>
+      <div className="overflow-y-auto p-3 sm:p-5 flex-1">{detailLoading ? <div className="p-12 text-center font-bold text-slate-500">Chargement du dossier...</div> : <>
+        {tab==='summary' && <div className="space-y-3"><div className="grid grid-cols-3 gap-2"><Mini label="Cartes" value={cards.length}/><Mini label="Demandes" value={requests.length}/><Mini label="Livraisons" value={deliveries.length}/></div><div className="bg-white border rounded-2xl p-4 grid sm:grid-cols-2 gap-3"><Info label="Nom" value={selectedUser.displayName}/><Info label="Email" value={selectedUser.email}/><Info label="Téléphone" value={selectedUser.phone}/><Info label="Rôle" value={selectedUser.role}/><Info label="Agence" value={selectedUser.agencyName||selectedUser.agencyId}/><Info label="Inscription" value={fmt(selectedUser.createdAt)}/></div>{currentUser?.role==='admin_general'&&<button onClick={()=>editRole(selectedUser)} className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-blue-950 text-white font-black text-xs flex items-center justify-center gap-2"><Edit3 size={15}/>Modifier rôle & agence</button>}</div>}
+        {tab==='cards' && <List count={cards.length} empty="Aucune carte attribuée">{cards.map(c=><Item key={c.id||c.cardId} icon={<CreditCard size={17}/>} title={c.cardIdentifier||c.cardId} subtitle={`${c.status} · ${c.saleStatus||'—'} · ${c.printStatus||'—'}`}/>)}</List>}
+        {tab==='requests' && <List count={requests.length} empty="Aucune demande">{requests.map(r=><Item key={r.id} icon={<FileText size={17}/>} title={`${r.amount} ${r.currency||'USD'} · ${r.status}`} subtitle={`${r.cardName||'Carte Market-Cash'}${r.isUrgent||r.urgentProcessing?' · Urgente':''} · ${fmt(r.createdAt)}`}/>)}</List>}
+        {tab==='deliveries' && <List count={deliveries.length} empty="Aucune livraison">{deliveries.map(d=><Item key={d.id} icon={<Truck size={17}/>} title={`${d.cardIdentifier||d.cardId} · ${d.status}`} subtitle={`${d.deliveryAddress} · ${fmt(d.createdAt)}`}/>)}</List>}
+        {tab==='history' && <List count={logs.length} empty="Aucune activité enregistrée">{logs.map(l=><div key={l.id} className="bg-white border rounded-2xl p-3"><div className="flex justify-between gap-2"><div className="font-black text-sm break-words">{l.event}</div><div className="text-[9px] text-slate-400 whitespace-nowrap">{fmt(l.timestamp)}</div></div><div className="text-xs text-slate-500 mt-1 break-words">{l.message}</div><div className="text-[10px] mt-2 font-bold text-slate-400">{l.operation||l.category} · {l.success===false?'Échec':'OK'}</div></div>)}</List>}
+        {tab==='security' && <div className="grid sm:grid-cols-2 gap-2"><Security label="PIN" value={selectedUser.pinHash?'Configuré':'Non configuré'}/><Security label="Biométrie" value={selectedUser.useBiometrics?'Activée':'Désactivée'}/><Security label="Rôle" value={selectedUser.role}/><Security label="Protection" value="PIN, CVV et tokens ne sont jamais affichés ici"/></div>}
+      </>}</div>
+    </div></div>}
+
+    {editingUser && <div className="fixed inset-0 z-[60] bg-slate-950/70 p-3 flex items-center justify-center"><form onSubmit={saveRole} className="w-full max-w-md bg-white rounded-3xl p-5 space-y-3"><div className="flex justify-between"><div><div className="font-black text-lg">Rôle & agence</div><div className="text-xs text-slate-500">{editingUser.displayName}</div></div><button type="button" onClick={()=>setEditingUser(null)} className="p-2 rounded-full bg-slate-100"><X size={17}/></button></div><select value={selectedRole} onChange={e=>setSelectedRole(e.target.value as UserRole)} className="w-full p-3 rounded-xl border font-bold"><option value="client">Client</option><option value="chef_agence">Chef d'Agence</option><option value="designer_graphique">Designer Graphique</option><option value="livreur">Livreur</option><option value="admin_general">Admin Général</option></select><input value={agencyName} onChange={e=>setAgencyName(e.target.value)} placeholder="Agence / secteur" className="w-full p-3 rounded-xl border"/><button disabled={isSaving} className="w-full p-3 rounded-xl bg-blue-950 text-white font-black">{isSaving?'Enregistrement...':'Confirmer'}</button></form></div>}
+  </div>;
 }
+
+function Avatar({user,large=false}:{user:User,large?:boolean}){return <div className={`${large?'w-12 h-12':'w-9 h-9'} rounded-xl bg-blue-100 text-blue-700 overflow-hidden flex items-center justify-center shrink-0`}>{user.avatar?<img src={user.avatar} alt="" className="w-full h-full object-cover"/>:<UserIcon size={large?22:17}/>}</div>}
+function RoleBadge({role}:{role:UserRole}){return <span className="shrink-0 px-2 py-1 rounded-lg bg-slate-100 text-slate-600 text-[9px] font-black">{role}</span>}
+function Stat({label,value}:{label:string,value:number}){return <div className="bg-white border rounded-2xl p-3"><div className="text-[10px] text-slate-400 font-bold">{label}</div><div className="text-xl font-black text-blue-950">{value}</div></div>}
+function Mini({label,value}:{label:string,value:number}){return <div className="bg-white border rounded-xl p-3 text-center"><div className="text-xl font-black text-blue-950">{value}</div><div className="text-[9px] text-slate-400 font-bold">{label}</div></div>}
+function Info({label,value}:{label:string,value?:string}){return <div><div className="text-[10px] uppercase font-black text-slate-400">{label}</div><div className="text-sm font-bold text-slate-800 break-words">{value||'—'}</div></div>}
+function Item({icon,title,subtitle}:{icon:React.ReactNode,title:string,subtitle:string}){return <div className="bg-white border rounded-2xl p-3 flex gap-3"><div className="text-blue-800 pt-0.5">{icon}</div><div className="min-w-0"><div className="font-black text-sm break-words">{title}</div><div className="text-xs text-slate-500 break-words mt-0.5">{subtitle}</div></div></div>}
+function List({count,empty,children}:{count:number,empty:string,children:React.ReactNode}){return <div className="space-y-2">{count?children:<div className="p-10 text-center bg-white border rounded-2xl text-slate-400">{empty}</div>}</div>}
+function Security({label,value}:{label:string,value:string}){return <div className="bg-white border rounded-2xl p-4 flex gap-3"><Shield size={18} className="text-emerald-600"/><div><div className="text-[10px] text-slate-400 font-black">{label}</div><div className="text-sm font-bold">{value}</div></div></div>}
