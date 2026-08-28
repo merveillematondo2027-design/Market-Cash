@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { initializeFirestore } from 'firebase/firestore';
+import { initializeFirestore, type Firestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import config from '../../firebase-applet-config.json';
 
@@ -22,10 +22,13 @@ console.log('[FIREBASE_INIT]', {
 // Singleton Firebase App instance
 export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-// Initialize Firestore with auto-detect long polling to ensure robust WebChannel connectivity in iframes/proxies
-export const db = initializeFirestore(app, {
+// Conserve la même instance pendant les réévaluations HMR de Vite. Cela évite
+// de rappeler initializeFirestore sur la Firebase App déjà initialisée.
+const firebaseRuntime = globalThis as typeof globalThis & { __marketCashFirestore?: Firestore };
+export const db = firebaseRuntime.__marketCashFirestore || initializeFirestore(app, {
   experimentalAutoDetectLongPolling: true,
 }, config.firestoreDatabaseId);
+firebaseRuntime.__marketCashFirestore = db;
 
 console.log('[FIRESTORE_INIT]', {
   databaseId: config.firestoreDatabaseId

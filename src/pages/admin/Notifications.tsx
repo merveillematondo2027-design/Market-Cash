@@ -4,6 +4,7 @@ import { db } from '../../firebase/config';
 import { Notification, User } from '../../types';
 import toast from 'react-hot-toast';
 import { Plus, Trash2 } from 'lucide-react';
+import { firestoreErrorMessage, firestoreNetwork } from '../../lib/firestoreNetwork';
 
 const MAX_NOTIFICATION_TITLE_LENGTH = 200;
 const MAX_NOTIFICATION_MESSAGE_LENGTH = 2000;
@@ -25,13 +26,13 @@ export default function AdminNotifications() {
   const loadData = async () => {
     try {
       const q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'));
-      const snap = await getDocs(q);
+      const snap = await firestoreNetwork.guard('admin.notifications.list', () => getDocs(q));
       setNotifications(snap.docs.map(d => ({ ...d.data(), id: d.id } as Notification)));
 
-      const usersSnap = await getDocs(collection(db, 'users'));
+      const usersSnap = await firestoreNetwork.guard('admin.notifications.users', () => getDocs(collection(db, 'users')));
       setUsers(usersSnap.docs.map(d => d.data() as User));
     } catch (error) {
-      console.error(error);
+      firestoreNetwork.reportFailure('admin.notifications.load', error);
     } finally {
       setLoading(false);
     }
@@ -68,23 +69,23 @@ export default function AdminNotifications() {
         createdAt: Date.now(),
       } as Notification;
 
-      await setDoc(doc(db, 'notifications', id), notification);
+      await firestoreNetwork.guard('admin.notifications.create', () => setDoc(doc(db, 'notifications', id), notification));
       toast.success('Notification envoyée');
       setShowModal(false);
       loadData();
     } catch (error) {
-      toast.error('Erreur lors de l\'envoi');
+      toast.error(firestoreErrorMessage(error, "Erreur lors de l'envoi"));
     }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('Supprimer cette notification ?')) return;
     try {
-      await deleteDoc(doc(db, 'notifications', id));
+      await firestoreNetwork.guard('admin.notifications.delete', () => deleteDoc(doc(db, 'notifications', id)));
       toast.success('Notification supprimée');
       loadData();
     } catch (error) {
-      toast.error('Erreur lors de la suppression');
+      toast.error(firestoreErrorMessage(error, 'Erreur lors de la suppression'));
     }
   };
 

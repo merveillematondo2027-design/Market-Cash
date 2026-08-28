@@ -6,6 +6,7 @@ import { db } from '../../firebase/config';
 import { cardService } from '../../services/cardService';
 import { useAuthStore } from '../../store/authStore';
 import { UserCard } from '../../types';
+import { firestoreErrorMessage, firestoreNetwork } from '../../lib/firestoreNetwork';
 
 const EMPTY_FORM = { cardNumber: '', rechargeNumber: '', expiryStart: '02/27', expiryEnd: '08/27', cvv: '' };
 const maskCard = (value: string) => `•••• •••• •••• ${value.replace(/\D/g, '').slice(-4).padStart(4, '•')}`;
@@ -24,8 +25,9 @@ export default function AdminStock() {
   useEffect(() => onSnapshot(collection(db, 'cards'), snapshot => {
     setCards(snapshot.docs.map(item => ({ ...item.data(), id: item.id, cardId: item.id } as UserCard)).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
     setLoading(false);
+    firestoreNetwork.reportRecovered('admin.stock.listen');
   }, error => {
-    console.error('[STOCK_LIST_ERROR]', { code: error.code, message: error.message });
+    firestoreNetwork.reportFailure('admin.stock.listen', error);
     setLoading(false);
   }), []);
 
@@ -66,8 +68,7 @@ export default function AdminStock() {
       setShowForm(false);
     } catch (error: any) {
       const messages: Record<string, string> = { INVALID_CARD_NUMBER: 'Numéro de carte invalide.', INVALID_RECHARGE_NUMBER: 'Numéro de recharge invalide.', INVALID_CVV: 'CVV invalide.', INVALID_EXPIRY: 'Période de validité invalide.' };
-      toast.error(messages[error?.message] || "Impossible d'ajouter la carte au stock.");
-      console.error('[STOCK_CARD_CREATE_ERROR]', { code: error?.code || error?.message || 'unknown' });
+      toast.error(firestoreErrorMessage(error, messages[error?.message] || "Impossible d'ajouter la carte au stock."));
     } finally { setSaving(false); }
   };
 

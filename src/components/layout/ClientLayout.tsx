@@ -33,6 +33,7 @@ import { Notification } from '../../types';
 import LogoutModal from '../LogoutModal';
 import toast from 'react-hot-toast';
 import { MARKET_CASH_SUPPORT_URL, logWhatsAppSupportOpen } from '../../lib/whatsappSupport';
+import { firestoreNetwork } from '../../lib/firestoreNetwork';
 
 export default function ClientLayout() {
   const location = useLocation();
@@ -170,6 +171,9 @@ export default function ClientLayout() {
 
       setNotifications(items);
       isInitialSnapshotRef.current = false;
+      firestoreNetwork.reportRecovered('client.notifications.listen');
+    }, error => {
+      firestoreNetwork.reportFailure('client.notifications.listen', error);
     });
 
     return () => unsubscribe();

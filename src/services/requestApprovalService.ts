@@ -3,6 +3,7 @@ import { db } from '../firebase/config';
 import { CardPurchaseRequest, UserCard } from '../types';
 import { cardService, removeUndefined } from './cardService';
 import { logService } from './logService';
+import { firestoreNetwork } from '../lib/firestoreNetwork';
 
 export interface ReviewerIdentity {
   uid: string;
@@ -40,20 +41,20 @@ const validateManualCard = (details: ManualCardDetails) => {
 export const requestApprovalService = {
   async acceptIdentity(requestId: string, reviewer: ReviewerIdentity): Promise<void> {
     const requestRef = doc(db, 'card_purchase_requests', requestId);
-    const snap = await getDoc(requestRef);
+    const snap = await firestoreNetwork.guard('request.identity.read', () => getDoc(requestRef));
     if (!snap.exists()) throw new Error('REQUEST_NOT_FOUND');
     const request = snap.data() as CardPurchaseRequest;
     if (request.status !== 'pending') throw new Error('REQUEST_ALREADY_PROCESSED');
     if (isUrgentCardRequest(request)) throw new Error('URGENT_IDENTITY_NOT_REQUIRED');
     if (!request.identityProofUrl) throw new Error('IDENTITY_MISSING');
 
-    await updateDoc(requestRef, {
+    await firestoreNetwork.guard('request.identity.accept', () => updateDoc(requestRef, {
       identityVerified: true,
       identityReviewedAt: Date.now(),
       identityReviewedBy: reviewer.uid,
       identityReviewedByEmail: reviewer.email,
       updatedAt: Date.now()
-    });
+    }));
 
     logService.audit('IDENTITY_ACCEPTED', 'Pièce d’identité acceptée pour une demande normale', {
       operation: 'accept_identity',
@@ -65,7 +66,7 @@ export const requestApprovalService = {
   },
 
   async approveUrgentRequest(requestId: string, reviewer: ReviewerIdentity): Promise<UserCard> {
-    const requestSnap = await getDoc(doc(db, 'card_purchase_requests', requestId));
+    const requestSnap = await firestoreNetwork.guard('request.urgent.read', () => getDoc(doc(db, 'card_purchase_requests', requestId)));
     if (!requestSnap.exists()) throw new Error('REQUEST_NOT_FOUND');
     const request = requestSnap.data() as CardPurchaseRequest;
     if (!isUrgentCardRequest(request)) throw new Error('REQUEST_NOT_URGENT');
@@ -94,7 +95,7 @@ export const requestApprovalService = {
     const cardIdentifier = await cardService.generateUniqueCardIdentifier();
     const now = Date.now();
 
-    const issued = await runTransaction(db, async transaction => {
+    const issued = await firestoreNetwork.guard('request.normal.approve.transaction', () => runTransaction(db, async transaction => {
       const requestSnap = await transaction.get(requestRef);
       if (!requestSnap.exists()) throw new Error('REQUEST_NOT_FOUND');
       const request = requestSnap.data() as CardPurchaseRequest;
@@ -152,9 +153,9 @@ export const requestApprovalService = {
       });
 
       return card;
-    });
+    }));
 
-    const requestAfter = await getDoc(requestRef);
+    const requestAfter = await firestoreNetwork.guard('request.normal.confirm', () => getDoc(requestRef));
     const request = requestAfter.data() as CardPurchaseRequest | undefined;
     if (request?.printRequested === true || request?.physicalOption === 'normal') {
       await cardService.notifyRole(

@@ -1,6 +1,7 @@
 import { collection, addDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import { AppLog, LogCategory } from '../types';
+import { firestoreNetwork } from '../lib/firestoreNetwork';
 
 const REDACTED_KEYS = /(pin|cvv|token|secret|password|cardnumber|rechargenumber|proof)/i;
 
@@ -27,7 +28,11 @@ export const logService = {
         if ((logData as any)[key] === undefined) delete (logData as any)[key];
       });
 
-      if (currentUser) await addDoc(collection(db, 'appLogs'), logData);
+      // Ne tente pas d'écrire un diagnostic réseau dans Firestore quand son transport
+      // est déjà dégradé : cela évite la boucle erreur -> log -> nouvelle erreur.
+      if (currentUser && firestoreNetwork.getSnapshot().status !== 'degraded') {
+        await firestoreNetwork.guard('app_logs.create', () => addDoc(collection(db, 'appLogs'), logData));
+      }
 
       if (log.level === 'ERROR' || log.level === 'CRITICAL') console.error(`[${log.event}]`, log.message, logData);
       else if (log.level === 'WARNING') console.warn(`[${log.event}]`, log.message, logData);

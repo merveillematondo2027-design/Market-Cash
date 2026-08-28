@@ -12,6 +12,7 @@ import { useAuthStore } from './store/authStore';
 import { UserRole } from './types';
 import { getHomeRouteByRole } from './lib/roleNavigation';
 import { Toaster } from 'react-hot-toast';
+import FirestoreNetworkBanner from './components/FirestoreNetworkBanner';
 
 // Layouts
 import ClientLayout from './components/layout/ClientLayout';
@@ -148,6 +149,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <FirestoreNetworkBanner />
       <Toaster position="top-center" />
       <Routes>
         <Route path="/" element={<Navigate to={defaultHome} replace />} />

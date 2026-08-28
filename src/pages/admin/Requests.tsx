@@ -11,6 +11,7 @@ import {
   requestApprovalService
 } from '../../services/requestApprovalService';
 import toast from 'react-hot-toast';
+import { firestoreErrorMessage, firestoreNetwork } from '../../lib/firestoreNetwork';
 import {
   AlertTriangle, CheckCircle2, Clock, CreditCard, Eye, FileCheck2,
   History, ShieldCheck, Truck, X, Zap
@@ -53,8 +54,9 @@ export default function AdminRequests() {
       setRequests(list);
       setSelectedRequest(current => current ? list.find(item => item.id === current.id) || current : null);
       setLoading(false);
+      firestoreNetwork.reportRecovered('admin.requests.listen');
     }, error => {
-      console.error('[ADMIN_PURCHASES_ERROR]', error);
+      firestoreNetwork.reportFailure('admin.requests.listen', error);
       setLoading(false);
     });
 
@@ -62,7 +64,8 @@ export default function AdminRequests() {
       setDeliveryRequests(snap.docs
         .map(d => ({ ...d.data(), id: d.id } as PhysicalCardRequest))
         .sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)));
-    }, error => console.error('[ADMIN_DELIVERIES_ERROR]', error));
+      firestoreNetwork.reportRecovered('admin.deliveries.listen');
+    }, error => firestoreNetwork.reportFailure('admin.deliveries.listen', error));
 
     return () => {
       unsubscribePurchases();
@@ -122,7 +125,7 @@ export default function AdminRequests() {
       console.error('[IDENTITY_ACCEPT_ERROR]', error);
       const code = error?.message || error?.code;
       if (code === 'IDENTITY_MISSING') toast.error('Aucune pièce d’identité n’est disponible.');
-      else toast.error(`Validation de l’identité impossible${code ? ` : ${code}` : '.'}`);
+      else toast.error(firestoreErrorMessage(error, `Validation de l’identité impossible${code ? ` : ${code}` : '.'}`));
     } finally {
       setIsProcessing(false);
     }
@@ -148,7 +151,7 @@ export default function AdminRequests() {
       console.error('[URGENT_APPROVAL_ERROR]', error);
       const code = error?.message || error?.code;
       if (code === 'STOCK_EMPTY') toast.error('Stock épuisé : aucune carte préconfigurée disponible.');
-      else toast.error(`Approbation urgente impossible${code ? ` : ${code}` : '.'}`);
+      else toast.error(firestoreErrorMessage(error, `Approbation urgente impossible${code ? ` : ${code}` : '.'}`));
     } finally {
       setIsProcessing(false);
     }
@@ -178,7 +181,7 @@ export default function AdminRequests() {
         INVALID_CVV: 'Le CVV doit contenir 3 ou 4 chiffres.',
         INVALID_EXPIRY: 'Les dates doivent être au format MM/AA.'
       };
-      toast.error(messages[code] || `Approbation impossible${code ? ` : ${code}` : '.'}`);
+      toast.error(firestoreErrorMessage(error, messages[code] || `Approbation impossible${code ? ` : ${code}` : '.'}`));
     } finally {
       setIsProcessing(false);
     }
@@ -209,26 +212,30 @@ export default function AdminRequests() {
 
     setIsProcessing(true);
     try {
-      await updateDoc(doc(db, 'card_purchase_requests', request.id), {
+      await firestoreNetwork.guard('admin.request.reject', () => updateDoc(doc(db, 'card_purchase_requests', request.id), {
         status: 'rejected',
         rejectionReason: reason,
         processedAt: Date.now(),
         processedBy: reviewer.uid,
         updatedAt: Date.now()
-      });
-      await cardService.createNotification({
-        userId: request.userId,
-        title: `Demande refusée : ${cardName}`,
-        message,
-        type: 'error',
-        requestId: request.id,
-        cardName
-      });
+      }));
+      try {
+        await cardService.createNotification({
+          userId: request.userId,
+          title: `Demande refusée : ${cardName}`,
+          message,
+          type: 'error',
+          requestId: request.id,
+          cardName
+        });
+      } catch (notificationError) {
+        console.warn('[REJECT_NOTIFICATION_WARNING]', notificationError);
+      }
       closeAfterSuccess();
       toast.success('Demande rejetée et déplacée dans l’historique.');
     } catch (error) {
       console.error('[REJECT_REQUEST_ERROR]', error);
-      toast.error('Erreur lors du rejet.');
+      toast.error(firestoreErrorMessage(error, 'Erreur lors du rejet.'));
     } finally {
       setIsProcessing(false);
     }
@@ -243,7 +250,7 @@ export default function AdminRequests() {
       toast.success('Statut de livraison mis à jour.');
     } catch (error) {
       console.error('[DELIVERY_STATUS_ERROR]', error);
-      toast.error('Mise à jour impossible.');
+      toast.error(firestoreErrorMessage(error, 'Mise à jour impossible.'));
     } finally { setIsProcessing(false); }
   };
 

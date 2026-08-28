@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { db } from '../../firebase/config';
 import { AppLog, LogCategory, LogLevel } from '../../types';
 import { downloadLogsPdf } from '../../lib/logPdfExport';
+import { firestoreNetwork } from '../../lib/firestoreNetwork';
 import {
   Activity, AlertTriangle, CheckCircle, Copy, Download, FileWarning,
   Info, RefreshCw, Search, ShieldAlert, UserRound, X
@@ -32,6 +33,18 @@ const levelClass = (level: LogLevel) => {
 
 const resultText = (log: AppLog) => log.success === false ? 'Échec' : log.success === true ? 'Succès' : 'Information';
 
+const getNetworkLogs = (): AppLog[] => firestoreNetwork.getIncidents().map(incident => ({
+  id: `local-${incident.id}`,
+  timestamp: incident.timestamp,
+  level: incident.event === 'FIRESTORE_OPERATION_RECOVERED' ? 'SUCCESS' : incident.event === 'FIRESTORE_NETWORK_DEGRADED' ? 'WARNING' : 'ERROR',
+  category: 'FIRESTORE',
+  event: incident.event,
+  message: incident.message,
+  operation: incident.operation,
+  errorCode: incident.errorCode,
+  success: incident.event === 'FIRESTORE_OPERATION_RECOVERED'
+}));
+
 export const LogsCenter = () => {
   const navigate = useNavigate();
   const [logs, setLogs] = useState<AppLog[]>([]);
@@ -41,30 +54,37 @@ export const LogsCenter = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedLog, setSelectedLog] = useState<AppLog | null>(null);
   const [lastUpdate, setLastUpdate] = useState(new Date());
+  const [networkLogs, setNetworkLogs] = useState<AppLog[]>(getNetworkLogs);
+
+  useEffect(() => firestoreNetwork.subscribe(() => {
+    setNetworkLogs(getNetworkLogs());
+  }), []);
 
   useEffect(() => {
     const q = query(collection(db, 'appLogs'), orderBy('timestamp', 'desc'), limit(300));
     return onSnapshot(q, snap => {
       setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() } as AppLog)));
+      firestoreNetwork.reportRecovered('logs.listen');
       setLastUpdate(new Date());
       setLoading(false);
     }, error => {
-      console.error('[LOGS_CENTER_ERROR]', error);
+      firestoreNetwork.reportFailure('logs.listen', error);
       setLoading(false);
     });
   }, []);
 
-  const filteredLogs = useMemo(() => logs.filter(log => {
+  const allLogs = useMemo(() => [...networkLogs, ...logs].sort((a, b) => b.timestamp - a.timestamp), [logs, networkLogs]);
+  const filteredLogs = useMemo(() => allLogs.filter(log => {
     if (filterLevel !== 'ALL' && log.level !== filterLevel) return false;
     if (filterCategory !== 'ALL' && log.category !== filterCategory) return false;
     if (!searchTerm.trim()) return true;
     const term = searchTerm.trim().toLowerCase();
     return [log.event, log.message, log.userId, log.userEmail, log.userRole, log.errorCode, log.errorName, log.operation, log.route, log.collection]
       .some(value => String(value || '').toLowerCase().includes(term));
-  }), [logs, filterLevel, filterCategory, searchTerm]);
+  }), [allLogs, filterLevel, filterCategory, searchTerm]);
 
   const today = new Date().setHours(0, 0, 0, 0);
-  const todayLogs = logs.filter(l => l.timestamp >= today);
+  const todayLogs = allLogs.filter(l => l.timestamp >= today);
   const stats = {
     total: todayLogs.length,
     errors: todayLogs.filter(l => l.level === 'ERROR' || l.level === 'CRITICAL').length,
