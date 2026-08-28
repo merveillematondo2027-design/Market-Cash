@@ -7,6 +7,7 @@ import { useAuthStore } from '../../store/authStore';
 import { logService } from '../../services/logService';
 import toast from 'react-hot-toast';
 import { CreditCard, Edit3, FileText, Search, Shield, Truck, User as UserIcon, X } from 'lucide-react';
+import { firestoreErrorMessage, firestoreNetwork } from '../../lib/firestoreNetwork';
 
 type Tab = 'summary' | 'cards' | 'requests' | 'deliveries' | 'history' | 'security';
 const fmt = (value?: number) => value ? new Date(value).toLocaleString('fr-FR') : '—';
@@ -34,7 +35,7 @@ export default function AdminUsers() {
   async function loadUsers() {
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'users'), orderBy('createdAt', 'desc')));
+      const snap = await firestoreNetwork.guard('admin.users.list', () => getDocs(query(collection(db, 'users'), orderBy('createdAt', 'desc'))));
       const list = snap.docs.map(d => ({ ...d.data(), uid: d.id } as User));
       setUsers(list);
       const requestedUid = params.get('uid');
@@ -44,7 +45,7 @@ export default function AdminUsers() {
       }
     } catch (error) {
       console.error('[ADMIN_LOAD_USERS_ERROR]', error);
-      toast.error('Impossible de charger les utilisateurs.');
+      toast.error(firestoreErrorMessage(error, 'Impossible de charger les utilisateurs.'));
     } finally { setLoading(false); }
   }
 
@@ -58,19 +59,19 @@ export default function AdminUsers() {
     });
 
     try {
-      const [cardSnap, requestSnap, deliverySnap, ownLogsSnap] = await Promise.all([
+      const [cardSnap, requestSnap, deliverySnap, ownLogsSnap] = await firestoreNetwork.guard('admin.user_dossier.load', () => Promise.all([
         getDocs(query(collection(db, 'cards'), where('userId', '==', target.uid))),
         getDocs(query(collection(db, 'card_purchase_requests'), where('userId', '==', target.uid))),
         getDocs(query(collection(db, 'physical_card_requests'), where('userId', '==', target.uid))),
         getDocs(query(collection(db, 'appLogs'), where('userId', '==', target.uid)))
-      ]);
+      ]));
       setCards(cardSnap.docs.map(d => ({ ...d.data(), id: d.id } as UserCard)));
       setRequests(requestSnap.docs.map(d => ({ ...d.data(), id: d.id } as CardPurchaseRequest)).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)));
       setDeliveries(deliverySnap.docs.map(d => ({ ...d.data(), id: d.id } as PhysicalCardRequest)).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)));
       setLogs(ownLogsSnap.docs.map(d => ({ ...d.data(), id: d.id } as AppLog)).sort((a,b)=>b.timestamp-a.timestamp));
     } catch (error) {
       console.error('[CLIENT_DOSSIER_LOAD_ERROR]', error);
-      toast.error('Le dossier est ouvert, mais certaines données ne sont pas accessibles.');
+      toast.error(firestoreErrorMessage(error, 'Le dossier est ouvert, mais certaines données ne sont pas accessibles.'));
     } finally { setDetailLoading(false); }
   }
 
@@ -100,7 +101,7 @@ export default function AdminUsers() {
         updates.agencyId = deleteField();
         updates.agencyName = deleteField();
       }
-      await updateDoc(doc(db, 'users', editingUser.uid), updates);
+      await firestoreNetwork.guard('admin.user_role.update', () => updateDoc(doc(db, 'users', editingUser.uid), updates));
       logService.audit('USER_ROLE_CHANGED', 'Rôle utilisateur modifié', {
         targetType: 'user', targetId: editingUser.uid, targetUserId: editingUser.uid,
         oldRole: editingUser.role, newRole: selectedRole, success: true
@@ -110,7 +111,7 @@ export default function AdminUsers() {
       await loadUsers();
     } catch (error) {
       console.error('[UPDATE_ROLE_ERROR]', error);
-      toast.error('Modification du rôle impossible.');
+      toast.error(firestoreErrorMessage(error, 'Modification du rôle impossible.'));
     } finally { setIsSaving(false); }
   }
 

@@ -6,6 +6,7 @@ import { CardPurchaseRequest, PhysicalCardRequest } from '../../types';
 import { useAuthStore } from '../../store/authStore';
 import { cardService } from '../../services/cardService';
 import toast from 'react-hot-toast';
+import { firestoreErrorMessage, firestoreNetwork } from '../../lib/firestoreNetwork';
 import { Clock, CreditCard, Eye, History, Truck, X } from 'lucide-react';
 
 const MAX_NOTIFICATION_MESSAGE_LENGTH = 2000;
@@ -35,14 +36,16 @@ export default function AdminRequests() {
       });
       setRequests(list);
       setLoading(false);
+      firestoreNetwork.reportRecovered('admin.requests.listen');
     }, error => {
-      console.error('[ADMIN_PURCHASES_ERROR]', error);
+      firestoreNetwork.reportFailure('admin.requests.listen', error);
       setLoading(false);
     });
 
     const unsubscribeDeliveries = onSnapshot(query(collection(db, 'physical_card_requests')), snap => {
       setDeliveryRequests(snap.docs.map(d => ({ ...d.data(), id: d.id } as PhysicalCardRequest)).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)));
-    }, error => console.error('[ADMIN_DELIVERIES_ERROR]', error));
+      firestoreNetwork.reportRecovered('admin.deliveries.listen');
+    }, error => firestoreNetwork.reportFailure('admin.deliveries.listen', error));
 
     return () => {
       unsubscribePurchases();
@@ -75,6 +78,7 @@ export default function AdminRequests() {
     setIsProcessing(true);
     try {
       const assigned = await cardService.approveRequestWithStock(request.id, 'virtual', { uid: user.uid, email: user.email! });
+      firestoreNetwork.reportRecovered('admin.request.approve');
       try {
         await cardService.createNotification({
           userId: request.userId,
@@ -94,11 +98,11 @@ export default function AdminRequests() {
       setRejectionReason('');
       toast.success(`Carte ${assigned.cardIdentifier} attribuée avec succès.`);
     } catch (error: any) {
-      console.error('[APPROVE_REQUEST_ERROR]', error);
+      firestoreNetwork.reportFailure('admin.request.approve', error);
       const code = error?.message || error?.code;
       if (code === 'STOCK_EMPTY') toast.error('Stock épuisé : aucune carte disponible.');
       else if (code === 'IDENTITY_REQUIRED') toast.error("Pièce d'identité obligatoire avant l'approbation d'une demande normale.");
-      else toast.error(`Attribution impossible${code ? ` : ${code}` : '.'}`);
+      else toast.error(firestoreErrorMessage(error, `Attribution impossible${code ? ` : ${code}` : '.'}`));
     } finally {
       setIsProcessing(false);
     }
@@ -116,13 +120,13 @@ export default function AdminRequests() {
 
     setIsProcessing(true);
     try {
-      await updateDoc(doc(db, 'card_purchase_requests', request.id), {
+      await firestoreNetwork.guard('admin.request.reject', () => updateDoc(doc(db, 'card_purchase_requests', request.id), {
         status: 'rejected',
         rejectionReason: reason,
         processedAt: Date.now(),
         processedBy: user.email,
         updatedAt: Date.now()
-      });
+      }));
       try {
         await cardService.createNotification({
           userId: request.userId,
@@ -141,7 +145,7 @@ export default function AdminRequests() {
       toast.success('Demande rejetée et déplacée dans l’historique.');
     } catch (error) {
       console.error('[REJECT_REQUEST_ERROR]', error);
-      toast.error('Erreur lors du rejet.');
+      toast.error(firestoreErrorMessage(error, 'Erreur lors du rejet.'));
     } finally { setIsProcessing(false); }
   };
 
@@ -154,7 +158,7 @@ export default function AdminRequests() {
       toast.success('Statut de livraison mis à jour.');
     } catch (error) {
       console.error('[DELIVERY_STATUS_ERROR]', error);
-      toast.error('Mise à jour impossible.');
+      toast.error(firestoreErrorMessage(error, 'Mise à jour impossible.'));
     } finally { setIsProcessing(false); }
   };
 

@@ -17,6 +17,7 @@ import MarketCashCard from '../../components/MarketCashCard';
 
 import { cardService, DEFAULT_CARD_PRICING, CardPricingSettings } from '../../services/cardService';
 import { PaymentMethodItem } from '../../types';
+import { firestoreErrorMessage, firestoreNetwork } from '../../lib/firestoreNetwork';
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
@@ -117,8 +118,9 @@ export default function ClientCards() {
     const unsubscribeCards = onSnapshot(userCardsRef, (snap) => {
       const loadedMyCards = snap.docs.map(d => ({ ...d.data(), cardId: d.id, id: d.id } as UserCard));
       setMyCards(loadedMyCards);
+      firestoreNetwork.reportRecovered('client.cards.listen');
     }, (err) => {
-      console.error('[CARDS_LISTENER_ERROR]', err);
+      firestoreNetwork.reportFailure('client.cards.listen', err);
     });
 
     // 2. Real-time listener for card purchase requests
@@ -132,8 +134,9 @@ export default function ClientCards() {
         .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       setMyRequests(loadedRequests);
       setLoading(false);
+      firestoreNetwork.reportRecovered('client.requests.listen');
     }, (err) => {
-      console.error('[REQUESTS_LISTENER_ERROR]', err);
+      firestoreNetwork.reportFailure('client.requests.listen', err);
       setLoading(false);
     });
 
@@ -147,8 +150,9 @@ export default function ClientCards() {
         .map(d => ({ ...d.data(), id: d.id } as PhysicalCardRequest))
         .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       setMyDeliveryRequests(loadedDeliveries);
+      firestoreNetwork.reportRecovered('client.deliveries.listen');
     }, (err) => {
-      console.error('[DELIVERY_REQUESTS_LISTENER_ERROR]', err);
+      firestoreNetwork.reportFailure('client.deliveries.listen', err);
     });
 
     // 4. Real-time listener for administrable card design
@@ -429,7 +433,7 @@ export default function ClientCards() {
         code: error?.code || 'unknown',
         message: error?.message || 'Erreur inconnue'
       });
-      toast.error("Impossible d'envoyer la demande pour le moment. Vérifiez les informations de livraison et réessayez.");
+      toast.error(firestoreErrorMessage(error, "Impossible d'envoyer la demande pour le moment. Vérifiez les informations de livraison et réessayez."));
     } finally {
       setSubmittingDelivery(false);
     }
@@ -634,7 +638,7 @@ export default function ClientCards() {
 
       const requestPayload = removeUndefined(rawRequestPayload);
 
-      await setDoc(doc(db, 'card_purchase_requests', requestId), requestPayload);
+      await firestoreNetwork.guard('client.purchase_request.create', () => setDoc(doc(db, 'card_purchase_requests', requestId), requestPayload));
 
       toast.success('Demande enregistrée avec succès !');
       setPurchaseStep(5);
@@ -652,7 +656,7 @@ export default function ClientCards() {
 
     } catch (globalError: any) {
       console.error('[PURCHASE_SUBMIT_UNEXPECTED_ERROR]', globalError);
-      toast.error(`Erreur inattendue : ${globalError?.message || 'Impossible de finaliser la demande.'}`);
+      toast.error(firestoreErrorMessage(globalError, `Erreur inattendue : ${globalError?.message || 'Impossible de finaliser la demande.'}`));
     } finally {
       setIsSubmitting(false);
     }

@@ -16,6 +16,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase/config';
 import { UserCard, PhysicalCardRequest, DeliveryStatus, User, CardDesignSettings, PaymentMethodItem, HelpArticle } from '../types';
 import { generateAndUploadPvcCard } from '../lib/pvcCardGenerator';
+import { firestoreNetwork } from '../lib/firestoreNetwork';
 
 export interface CardPricingSettings {
   cardPrice: number | null;
@@ -265,6 +266,7 @@ export const cardService = {
   subscribePricing(callback: (pricing: CardPricingSettings) => void) {
     const docRef = doc(db, 'app_settings', 'card_pricing');
     return onSnapshot(docRef, (snap) => {
+      firestoreNetwork.reportRecovered('pricing.listen');
       if (snap.exists()) {
         const res = normalizePricing(snap.data());
         cachedPricingData = res;
@@ -275,7 +277,7 @@ export const cardService = {
         callback(res);
       }
     }, (err) => {
-      console.warn('[SUBSCRIBE_PRICING_ERROR]', err);
+      firestoreNetwork.reportFailure('pricing.listen', err);
       callback({
         cardPrice: null,
         printingPrice: null,
@@ -306,7 +308,7 @@ export const cardService = {
       currency: params.currency || 'USD',
       updatedAt: Date.now()
     };
-    await setDoc(docRef, removeUndefined(payload), { merge: true });
+    await firestoreNetwork.guard('pricing.update', () => setDoc(docRef, removeUndefined(payload), { merge: true }));
     cachedPricingData = normalizePricing(payload);
   },
 
@@ -330,6 +332,7 @@ export const cardService = {
   subscribePaymentMethods(callback: (methods: PaymentMethodItem[]) => void) {
     const docRef = doc(db, 'app_settings', 'payment_methods');
     return onSnapshot(docRef, (snap) => {
+      firestoreNetwork.reportRecovered('payment_methods.listen');
       if (snap.exists() && Array.isArray(snap.data().items)) {
         const items = (snap.data().items as PaymentMethodItem[]).sort((a, b) => (a.order || 0) - (b.order || 0));
         callback(items);
@@ -337,7 +340,7 @@ export const cardService = {
         callback(INITIAL_DEFAULT_PAYMENT_METHODS);
       }
     }, (err) => {
-      console.warn('[SUBSCRIBE_PAYMENT_METHODS_ERROR]', err);
+      firestoreNetwork.reportFailure('payment_methods.listen', err);
       callback(INITIAL_DEFAULT_PAYMENT_METHODS);
     });
   },
@@ -346,12 +349,12 @@ export const cardService = {
     const docRef = doc(db, 'app_settings', 'payment_methods');
     const cleanedItems = items.map(item => removeUndefined(item))
       .sort((a, b) => (a.order || 0) - (b.order || 0));
-    await setDoc(docRef, {
+    await firestoreNetwork.guard('payment_methods.save', () => setDoc(docRef, {
       items: cleanedItems,
       updatedAt: Date.now()
-    });
+    }));
 
-    const persistedSnap = await getDoc(docRef);
+    const persistedSnap = await firestoreNetwork.guard('payment_methods.confirm', () => getDoc(docRef));
     const persistedItems = persistedSnap.exists() && Array.isArray(persistedSnap.data().items)
       ? (persistedSnap.data().items as PaymentMethodItem[]).sort((a, b) => (a.order || 0) - (b.order || 0))
       : [];
@@ -420,6 +423,7 @@ export const cardService = {
   subscribeHelpArticles(callback: (articles: HelpArticle[]) => void) {
     const q = query(collection(db, 'help_articles'));
     return onSnapshot(q, (snap) => {
+      firestoreNetwork.reportRecovered('help_articles.listen');
       const articles: HelpArticle[] = [];
       snap.forEach(d => {
         articles.push(d.data() as HelpArticle);
@@ -427,7 +431,7 @@ export const cardService = {
       articles.sort((a, b) => (a.order || 0) - (b.order || 0));
       callback(articles);
     }, (err) => {
-      console.warn('[SUBSCRIBE_HELP_ARTICLES_ERROR]', err);
+      firestoreNetwork.reportFailure('help_articles.listen', err);
       // If error or empty, return default mapped
       const defaults = INITIAL_FAQ_ARTICLES.map((a, i) => ({
         id: `default-${i + 1}`,
@@ -464,7 +468,7 @@ export const cardService = {
     const counterDocId = `global_card_counter`;
     const counterRef = doc(db, 'counters', counterDocId);
 
-    const nextOrder = await runTransaction(db, async (transaction) => {
+    const nextOrder = await firestoreNetwork.guard('counters.card_identifier.transaction', () => runTransaction(db, async (transaction) => {
       const counterSnap = await transaction.get(counterRef);
       const currentCount = counterSnap.exists() ? Number(counterSnap.data().count || 0) : 0;
       const updatedCount = currentCount + 1;
@@ -473,7 +477,7 @@ export const cardService = {
         lastGeneratedAt: Date.now()
       }, { merge: true });
       return updatedCount;
-    });
+    }));
 
     const orderStr = String(nextOrder).padStart(3, '0');
     return `MC-${orderStr}${dateStr}`;
@@ -514,7 +518,7 @@ export const cardService = {
         requestId: params.requestId || '',
         deliveryId: params.deliveryId || ''
       };
-      await setDoc(doc(db, 'notifications', notifId), removeUndefined(notifData));
+      await firestoreNetwork.guard('notifications.create', () => setDoc(doc(db, 'notifications', notifId), removeUndefined(notifData)));
     } catch (err) {
       console.error('[NOTIFICATION_CREATE_ERROR]', err);
     }
@@ -543,7 +547,7 @@ export const cardService = {
       deliveryId
     };
 
-    await setDoc(doc(db, 'notifications', notificationId), notification);
+    await firestoreNetwork.guard('delivery.notifications.create', () => setDoc(doc(db, 'notifications', notificationId), notification));
   },
 
   /**
@@ -619,7 +623,7 @@ export const cardService = {
       updatedAt: Date.now()
     };
     
-    await setDoc(doc(db, 'cards', cardId), removeUndefined(newCard));
+    await firestoreNetwork.guard('stock.card.create', () => setDoc(doc(db, 'cards', cardId), removeUndefined(newCard)));
     return newCard;
   },
 
@@ -643,7 +647,7 @@ export const cardService = {
     
     // We do a query to find available cards first, because we can't easily query with limit inside a transaction in all JS SDKs
     const q = query(cardsRef, where('saleStatus', '==', 'available'), limit(10));
-    const availableDocs = await getDocs(q);
+    const availableDocs = await firestoreNetwork.guard('card_assignment.stock_lookup', () => getDocs(q));
     
     if (availableDocs.empty) {
       throw new Error('STOCK_EMPTY');
@@ -654,7 +658,7 @@ export const cardService = {
     
     for (const cardDoc of availableDocs.docs) {
       try {
-        assignedCard = await runTransaction(db, async (transaction) => {
+        assignedCard = await firestoreNetwork.guard('card_assignment.transaction', () => runTransaction(db, async (transaction) => {
           const cDoc = await transaction.get(cardDoc.ref);
           if (!cDoc.exists() || cDoc.data().saleStatus !== 'available') {
             throw new Error('CARD_UNAVAILABLE');
@@ -708,7 +712,7 @@ export const cardService = {
           });
           
           return updatedCard as UserCard;
-        });
+        }));
         
         if (assignedCard) break; // Successfully assigned
       } catch (err: any) {
@@ -723,7 +727,7 @@ export const cardService = {
       throw new Error('STOCK_EMPTY'); // All tried cards were unavailable
     }
 
-    const requestSnap = await getDoc(requestRef);
+    const requestSnap = await firestoreNetwork.guard('card_assignment.confirm', () => getDoc(requestRef));
     const requestData = requestSnap.data();
     const printRequested = typeof requestData?.printRequested === 'boolean'
       ? requestData.printRequested
@@ -749,12 +753,12 @@ export const cardService = {
     agencyName?: string;
     printRequested?: boolean;
   }): Promise<UserCard> {
-    const available = await getDocs(query(collection(db, 'cards'), where('saleStatus', '==', 'available'), limit(10)));
+    const available = await firestoreNetwork.guard('direct_assignment.stock_lookup', () => getDocs(query(collection(db, 'cards'), where('saleStatus', '==', 'available'), limit(10))));
     if (available.empty) throw new Error('STOCK_EMPTY');
 
     for (const candidate of available.docs) {
       try {
-        return await runTransaction(db, async transaction => {
+        return await firestoreNetwork.guard('direct_assignment.transaction', () => runTransaction(db, async transaction => {
           const cardSnap = await transaction.get(candidate.ref);
           if (!cardSnap.exists() || cardSnap.data().saleStatus !== 'available') throw new Error('CARD_UNAVAILABLE');
           const card = cardSnap.data() as UserCard;
@@ -778,7 +782,7 @@ export const cardService = {
           });
           transaction.set(candidate.ref, updated, { merge: true });
           return updated as UserCard;
-        });
+        }));
       } catch (error: any) {
         if (error?.message === 'CARD_UNAVAILABLE') continue;
         throw error;
@@ -838,7 +842,7 @@ async confirmAndIssuePhysicalCard(params: {
     };
 
     // Save initial card doc
-    await setDoc(doc(db, 'cards', cardId), removeUndefined(newCard));
+    await firestoreNetwork.guard('card.normal.create', () => setDoc(doc(db, 'cards', cardId), removeUndefined(newCard)));
 
     // Generate & Upload high-res PVC image
     try {
@@ -1011,17 +1015,20 @@ async confirmAndIssuePhysicalCard(params: {
 
     const cleanRequestData = removeUndefined(requestData);
 
-    await setDoc(doc(db, 'physical_card_requests', deliveryId), cleanRequestData);
+    await firestoreNetwork.guard('delivery.request.create', () => setDoc(doc(db, 'physical_card_requests', deliveryId), cleanRequestData));
     console.log('[DELIVERY_REQUEST_SUCCESS]', {
       deliveryId,
       cardId: finalCardId,
       cardIdentifier: finalCardIdentifier
     });
 
-    await Promise.all([
+    const roleNotificationResults = await Promise.allSettled([
       this.createDeliveryRoleNotification('admin_general', deliveryId, finalCardIdentifier),
       this.createDeliveryRoleNotification('livreur', deliveryId, finalCardIdentifier)
     ]);
+    roleNotificationResults.forEach(result => {
+      if (result.status === 'rejected') console.warn('[DELIVERY_NOTIFICATION_WARNING]', result.reason);
+    });
 
     // Notify Client
     await this.createNotification({
@@ -1047,7 +1054,7 @@ async confirmAndIssuePhysicalCard(params: {
     extra?: { reportReason?: string; cancelReason?: string; deliveryReport?: string; assignedLivreur?: User }
   ) {
     const deliveryRef = doc(db, 'physical_card_requests', deliveryId);
-    const snap = await getDoc(deliveryRef);
+    const snap = await firestoreNetwork.guard('delivery.status.read', () => getDoc(deliveryRef));
     if (!snap.exists()) throw new Error('Demande de livraison introuvable');
     const data = snap.data() as PhysicalCardRequest;
 
@@ -1090,7 +1097,7 @@ async confirmAndIssuePhysicalCard(params: {
       updates.assignedLivreurPhone = '';
     }
 
-    await updateDoc(deliveryRef, removeUndefined(updates));
+    await firestoreNetwork.guard('delivery.status.update', () => updateDoc(deliveryRef, removeUndefined(updates)));
 
     // Notify Client
     let statusLabel = 'mise à jour';
@@ -1153,6 +1160,7 @@ async confirmAndIssuePhysicalCard(params: {
     return onSnapshot(
       doc(db, 'app_settings', 'card_design'),
       (snap) => {
+        firestoreNetwork.reportRecovered('card_design.listen');
         if (snap.exists()) {
           callback(snap.data() as CardDesignSettings);
         } else {
@@ -1160,7 +1168,7 @@ async confirmAndIssuePhysicalCard(params: {
         }
       },
       (error) => {
-        console.warn('[SUBSCRIBE_CARD_DESIGN_ERROR]', error);
+        firestoreNetwork.reportFailure('card_design.listen', error);
         callback(null);
       }
     );

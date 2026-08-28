@@ -8,6 +8,7 @@ import {
   User, LogOut, Settings, DollarSign, CreditCard, Smartphone, Plus, Edit3, Trash2, Check, X, Save, ShieldCheck, HelpCircle, Bell, Palette, Server, Lock, ExternalLink, ChevronRight, AlertCircle, ToggleLeft, ToggleRight, Copy, Info, Activity } from 'lucide-react';
 import LogoutModal from '../../components/LogoutModal';
 import toast from 'react-hot-toast';
+import { firestoreErrorMessage } from '../../lib/firestoreNetwork';
 
 export default function AdminProfile() {
   const { user } = useAuthStore();
@@ -95,7 +96,7 @@ export default function AdminProfile() {
       toast.success('Tarifs des cartes enregistrés avec succès dans Firestore !');
     } catch (err: any) {
       console.error('[PRICING_SAVE_ERROR]', err);
-      toast.error(`Erreur : ${err?.message || 'Impossible d\'enregistrer les tarifs'}`);
+      toast.error(firestoreErrorMessage(err, `Erreur : ${err?.message || 'Impossible d\'enregistrer les tarifs'}`));
     } finally {
       setSavingPricing(false);
     }
@@ -139,7 +140,7 @@ export default function AdminProfile() {
       setEditingMethod(null);
     } catch (err: any) {
       console.error('[PAYMENT_METHOD_SAVE_ERROR]', err);
-      toast.error(`Erreur : ${err?.message || 'Impossible de sauvegarder'}`);
+      toast.error(firestoreErrorMessage(err, `Erreur : ${err?.message || 'Impossible de sauvegarder'}`));
     } finally {
       setSavingMethod(false);
     }
@@ -154,7 +155,7 @@ export default function AdminProfile() {
       });
       toast.success(`Numéro ${method.network} ${!method.active ? 'activé' : 'désactivé'}.`);
     } catch (err) {
-      toast.error('Erreur lors de la modification.');
+      toast.error(firestoreErrorMessage(err, 'Erreur lors de la modification.'));
     }
   };
 
@@ -168,7 +169,7 @@ export default function AdminProfile() {
       await cardService.deletePaymentMethod(id);
       toast.success('Moyen de paiement supprimé.');
     } catch (err) {
-      toast.error('Erreur lors de la suppression.');
+      toast.error(firestoreErrorMessage(err, 'Erreur lors de la suppression.'));
     }
   };
 
