@@ -111,7 +111,7 @@ export default function AdminRequests() {
     setActionType(isUrgentCardRequest(request) ? 'approve-urgent' : 'approve-normal');
   };
 
-  const handleAcceptIdentity = async () => {
+  const handleAcceptIdentity = async (): Promise<void> => {
     if (!selectedRequest || !reviewer || isProcessing) return;
     setIsProcessing(true);
     try {
@@ -128,7 +128,7 @@ export default function AdminRequests() {
     }
   };
 
-  const handleApproveUrgent = async () => {
+  const handleApproveUrgent = async (): Promise<void> => {
     if (!selectedRequest || !reviewer || isProcessing) return;
     const request = selectedRequest;
     setIsProcessing(true);
@@ -154,11 +154,12 @@ export default function AdminRequests() {
     }
   };
 
-  const handleApproveNormal = async (event: React.FormEvent) => {
+  const handleApproveNormal = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault();
     if (!selectedRequest || !reviewer || isProcessing) return;
     if (selectedRequest.identityVerified !== true) {
-      return toast.error('Acceptez d’abord la pièce d’identité du client.');
+      toast.error('Acceptez d’abord la pièce d’identité du client.');
+      return;
     }
 
     setIsProcessing(true);
@@ -190,15 +191,21 @@ export default function AdminRequests() {
     setManualCard(emptyManualCard);
   };
 
-  const handleReject = async (event: React.FormEvent) => {
+  const handleReject = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault();
     if (!selectedRequest || !reviewer || isProcessing) return;
     const request = selectedRequest;
     const reason = rejectionReason.trim();
-    if (!reason) return toast.error('Raison du rejet obligatoire.');
+    if (!reason) {
+      toast.error('Raison du rejet obligatoire.');
+      return;
+    }
     const cardName = request.cardName || 'Market-Cash';
     const message = rejectionMessage(cardName, reason);
-    if (message.length > MAX_NOTIFICATION_MESSAGE_LENGTH) return toast.error('Motif trop long.');
+    if (message.length > MAX_NOTIFICATION_MESSAGE_LENGTH) {
+      toast.error('Motif trop long.');
+      return;
+    }
 
     setIsProcessing(true);
     try {
