@@ -6,11 +6,21 @@ import { AppLog, CardPurchaseRequest, PhysicalCardRequest, User, UserCard, UserR
 import { useAuthStore } from '../../store/authStore';
 import { logService } from '../../services/logService';
 import toast from 'react-hot-toast';
-import { CreditCard, Edit3, FileText, Search, Shield, Truck, User as UserIcon, X } from 'lucide-react';
+import { CreditCard, Edit3, FileText, Filter, RotateCcw, Search, Shield, Truck, User as UserIcon, X } from 'lucide-react';
 import { firestoreErrorMessage, firestoreNetwork } from '../../lib/firestoreNetwork';
 
 type Tab = 'summary' | 'cards' | 'requests' | 'deliveries' | 'history' | 'security';
+type RoleFilter = 'all' | UserRole;
+type ProfileFilter = 'all' | 'complete' | 'incomplete' | 'with_phone' | 'without_phone';
+type PeriodFilter = 'all' | 'today' | '7d' | '30d';
+type SortFilter = 'newest' | 'oldest' | 'name_asc' | 'name_desc';
+
 const fmt = (value?: number) => value ? new Date(value).toLocaleString('fr-FR') : '—';
+const safeDate = (value?: number) => {
+  if (!value) return 'Date non disponible';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Date non disponible' : date.toLocaleDateString('fr-FR');
+};
 
 export default function AdminUsers() {
   const { user: currentUser } = useAuthStore();
@@ -18,6 +28,11 @@ export default function AdminUsers() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
+  const [agencyFilter, setAgencyFilter] = useState('all');
+  const [profileFilter, setProfileFilter] = useState<ProfileFilter>('all');
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('all');
+  const [sortFilter, setSortFilter] = useState<SortFilter>('newest');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [tab, setTab] = useState<Tab>('summary');
   const [detailLoading, setDetailLoading] = useState(false);
@@ -115,10 +130,49 @@ export default function AdminUsers() {
     } finally { setIsSaving(false); }
   }
 
-  const filtered = useMemo(() => users.filter(u => {
-    const q = searchQuery.trim().toLowerCase();
-    return !q || [u.displayName, u.email, u.phone, u.role, u.agencyName].some(v => String(v || '').toLowerCase().includes(q));
-  }), [users, searchQuery]);
+  const agencies = useMemo(() => Array.from(new Set(users.map(u => u.agencyName || u.agencyId).filter(Boolean) as string[])).sort((a,b)=>a.localeCompare(b, 'fr')), [users]);
+
+  const resetFilters = () => {
+    setSearchQuery('');
+    setRoleFilter('all');
+    setAgencyFilter('all');
+    setProfileFilter('all');
+    setPeriodFilter('all');
+    setSortFilter('newest');
+  };
+
+  const filtered = useMemo(() => {
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const result = users.filter(u => {
+      const q = searchQuery.trim().toLowerCase();
+      const matchesSearch = !q || [u.displayName, u.email, u.phone, u.role, u.agencyName, u.agencyId].some(v => String(v || '').toLowerCase().includes(q));
+      const matchesRole = roleFilter === 'all' || u.role === roleFilter;
+      const userAgency = u.agencyName || u.agencyId || '';
+      const matchesAgency = agencyFilter === 'all' || userAgency === agencyFilter;
+      const profileComplete = Boolean(u.displayName?.trim() && u.email?.trim() && u.phone?.trim());
+      const matchesProfile = profileFilter === 'all'
+        || (profileFilter === 'complete' && profileComplete)
+        || (profileFilter === 'incomplete' && !profileComplete)
+        || (profileFilter === 'with_phone' && Boolean(u.phone?.trim()))
+        || (profileFilter === 'without_phone' && !u.phone?.trim());
+      const createdAt = Number(u.createdAt || 0);
+      const matchesPeriod = periodFilter === 'all'
+        || (periodFilter === 'today' && createdAt >= now - day)
+        || (periodFilter === '7d' && createdAt >= now - 7 * day)
+        || (periodFilter === '30d' && createdAt >= now - 30 * day);
+      return matchesSearch && matchesRole && matchesAgency && matchesProfile && matchesPeriod;
+    });
+
+    return [...result].sort((a, b) => {
+      if (sortFilter === 'oldest') return Number(a.createdAt || 0) - Number(b.createdAt || 0);
+      if (sortFilter === 'name_asc') return String(a.displayName || '').localeCompare(String(b.displayName || ''), 'fr');
+      if (sortFilter === 'name_desc') return String(b.displayName || '').localeCompare(String(a.displayName || ''), 'fr');
+      return Number(b.createdAt || 0) - Number(a.createdAt || 0);
+    });
+  }, [users, searchQuery, roleFilter, agencyFilter, profileFilter, periodFilter, sortFilter]);
+
+  const activeFilterCount = [roleFilter !== 'all', agencyFilter !== 'all', profileFilter !== 'all', periodFilter !== 'all', sortFilter !== 'newest', Boolean(searchQuery.trim())].filter(Boolean).length;
 
   if (loading) return <div className="p-8 text-center font-bold text-slate-500">Chargement des utilisateurs...</div>;
 
@@ -130,15 +184,34 @@ export default function AdminUsers() {
 
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2"><Stat label="Utilisateurs" value={users.length}/><Stat label="Clients" value={users.filter(u=>u.role==='client').length}/><Stat label="Personnel" value={users.filter(u=>u.role!=='client').length}/><Stat label="Agences" value={new Set(users.map(u=>u.agencyId).filter(Boolean)).size}/></div>
 
+    <section className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 shadow-sm space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-blue-950"><Filter size={16}/><span className="font-black text-sm">Filtrer & trier</span>{activeFilterCount > 0 && <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-black">{activeFilterCount}</span>}</div>
+        <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-[11px] font-black text-slate-500 hover:text-blue-800"><RotateCcw size={13}/>Réinitialiser</button>
+      </div>
+
+      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+        {[['all','Tous'],['client','Clients'],['admin_general','Admins'],['chef_agence','Chefs agence'],['designer_graphique','Designers'],['livreur','Livreurs']].map(([value,label]) => <button key={value} type="button" onClick={()=>setRoleFilter(value as RoleFilter)} className={`shrink-0 px-3 py-2 rounded-xl text-[11px] font-black border ${roleFilter===value?'bg-blue-950 text-white border-blue-950':'bg-slate-50 text-slate-600 border-slate-200'}`}>{label}</button>)}
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+        <label className="text-[10px] font-black text-slate-400 uppercase">Agence<select value={agencyFilter} onChange={e=>setAgencyFilter(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-slate-700 outline-none focus:border-blue-500"><option value="all">Toutes</option>{agencies.map(a=><option key={a} value={a}>{a}</option>)}</select></label>
+        <label className="text-[10px] font-black text-slate-400 uppercase">Profil<select value={profileFilter} onChange={e=>setProfileFilter(e.target.value as ProfileFilter)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-slate-700 outline-none focus:border-blue-500"><option value="all">Tous profils</option><option value="complete">Profil complet</option><option value="incomplete">Profil incomplet</option><option value="with_phone">Avec téléphone</option><option value="without_phone">Sans téléphone</option></select></label>
+        <label className="text-[10px] font-black text-slate-400 uppercase">Inscription<select value={periodFilter} onChange={e=>setPeriodFilter(e.target.value as PeriodFilter)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-slate-700 outline-none focus:border-blue-500"><option value="all">Toutes dates</option><option value="today">Aujourd'hui / 24h</option><option value="7d">7 derniers jours</option><option value="30d">30 derniers jours</option></select></label>
+        <label className="text-[10px] font-black text-slate-400 uppercase">Trier par<select value={sortFilter} onChange={e=>setSortFilter(e.target.value as SortFilter)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-slate-700 outline-none focus:border-blue-500"><option value="newest">Plus récents</option><option value="oldest">Plus anciens</option><option value="name_asc">Nom A → Z</option><option value="name_desc">Nom Z → A</option></select></label>
+      </div>
+      <div className="text-[10px] text-slate-400 font-bold">{filtered.length} résultat{filtered.length>1?'s':''} sur {users.length} utilisateur{users.length>1?'s':''}</div>
+    </section>
+
     <div className="sm:hidden space-y-2.5">
       {filtered.map(u => <button key={u.uid} onClick={()=>void openUser(u)} className="w-full text-left bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
         <div className="flex items-start gap-3"><Avatar user={u}/><div className="min-w-0 flex-1"><div className="font-black text-blue-800 text-sm break-words">{u.displayName||'Sans nom'}</div><div className="text-xs text-slate-500 truncate mt-0.5">{u.email}</div><div className="text-[11px] text-slate-400 mt-1">{u.phone||'Téléphone non renseigné'}</div></div><RoleBadge role={u.role}/></div>
-        <div className="mt-3 flex justify-between text-[10px] text-slate-400"><span>{new Date(u.createdAt).toLocaleDateString('fr-FR')}</span><span className="font-black text-blue-700">Ouvrir dossier →</span></div>
+        <div className="mt-3 flex justify-between text-[10px] text-slate-400"><span>{safeDate(u.createdAt)}</span><span className="font-black text-blue-700">Ouvrir dossier →</span></div>
       </button>)}
-      {!filtered.length && <div className="p-10 text-center bg-white border rounded-2xl text-slate-400">Aucun utilisateur trouvé.</div>}
+      {!filtered.length && <div className="p-10 text-center bg-white border rounded-2xl text-slate-400">Aucun utilisateur trouvé avec ces filtres.</div>}
     </div>
 
-    <div className="hidden sm:block bg-white border rounded-2xl overflow-hidden"><table className="w-full text-left text-xs"><thead className="bg-slate-50 text-slate-500 uppercase"><tr><th className="p-3">Utilisateur</th><th className="p-3">Contact</th><th className="p-3">Rôle</th><th className="p-3">Agence</th><th className="p-3">Inscription</th><th className="p-3 text-right">Action</th></tr></thead><tbody className="divide-y divide-slate-100">{filtered.map(u=><tr key={u.uid}><td className="p-3"><button onClick={()=>void openUser(u)} className="flex items-center gap-2 text-left"><Avatar user={u}/><span className="font-black text-blue-800 hover:underline">{u.displayName||'Sans nom'}</span></button></td><td className="p-3"><div>{u.email}</div><div className="text-slate-400">{u.phone||'—'}</div></td><td className="p-3"><RoleBadge role={u.role}/></td><td className="p-3">{u.agencyName||u.agencyId||'—'}</td><td className="p-3">{new Date(u.createdAt).toLocaleDateString('fr-FR')}</td><td className="p-3 text-right"><button onClick={()=>void openUser(u)} className="px-3 py-2 rounded-lg bg-blue-950 text-white font-black">Ouvrir</button></td></tr>)}</tbody></table></div>
+    <div className="hidden sm:block bg-white border rounded-2xl overflow-hidden"><table className="w-full text-left text-xs"><thead className="bg-slate-50 text-slate-500 uppercase"><tr><th className="p-3">Utilisateur</th><th className="p-3">Contact</th><th className="p-3">Rôle</th><th className="p-3">Agence</th><th className="p-3">Inscription</th><th className="p-3 text-right">Action</th></tr></thead><tbody className="divide-y divide-slate-100">{filtered.map(u=><tr key={u.uid}><td className="p-3"><button onClick={()=>void openUser(u)} className="flex items-center gap-2 text-left"><Avatar user={u}/><span className="font-black text-blue-800 hover:underline">{u.displayName||'Sans nom'}</span></button></td><td className="p-3"><div>{u.email}</div><div className="text-slate-400">{u.phone||'—'}</div></td><td className="p-3"><RoleBadge role={u.role}/></td><td className="p-3">{u.agencyName||u.agencyId||'—'}</td><td className="p-3">{safeDate(u.createdAt)}</td><td className="p-3 text-right"><button onClick={()=>void openUser(u)} className="px-3 py-2 rounded-lg bg-blue-950 text-white font-black">Ouvrir</button></td></tr>)}</tbody></table></div>
 
     {selectedUser && <div className="fixed inset-0 z-50 bg-slate-950/70 p-2 sm:p-5 flex items-center justify-center" onMouseDown={e=>{if(e.target===e.currentTarget)closeUser()}}><div className="w-full max-w-5xl max-h-[94vh] bg-slate-50 rounded-3xl shadow-2xl overflow-hidden flex flex-col">
       <div className="bg-blue-950 text-white p-4 flex justify-between gap-3"><div className="flex gap-3 min-w-0"><Avatar user={selectedUser} large/><div className="min-w-0"><h2 className="text-lg font-black truncate">{selectedUser.displayName||'Client Market-Cash'}</h2><div className="text-xs text-blue-200 truncate">{selectedUser.email}</div><div className="text-[9px] text-blue-300 font-mono mt-1 truncate">UID {selectedUser.uid}</div></div></div><button onClick={closeUser} className="p-2 rounded-full bg-white/10 shrink-0"><X size={18}/></button></div>
