@@ -14,6 +14,9 @@ import { getHomeRouteByRole } from './lib/roleNavigation';
 import { Toaster } from 'react-hot-toast';
 import FirestoreNetworkBanner from './components/FirestoreNetworkBanner';
 
+// Public page
+import Home from './pages/Home';
+
 // Layouts
 import ClientLayout from './components/layout/ClientLayout';
 import AdminLayout from './components/layout/AdminLayout';
@@ -103,7 +106,7 @@ function RoleProtectedRoute({ children, allowedRoles }: RoleProtectedRouteProps)
 }
 
 export default function App() {
-  const { setFirebaseUser, setUser, setLoading, loading, user } = useAuthStore();
+  const { setFirebaseUser, setUser, setLoading } = useAuthStore();
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -114,7 +117,7 @@ export default function App() {
       } : null);
 
       setFirebaseUser(firebaseUser);
-      
+
       if (firebaseUser) {
         try {
           const userDoc = await authService.resolveUser(firebaseUser);
@@ -127,33 +130,21 @@ export default function App() {
       } else {
         setUser(null);
       }
-      
+
       setLoading(false);
     });
 
     return () => unsubscribe();
   }, [setFirebaseUser, setUser, setLoading]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 font-sans">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-blue-950 border-t-amber-400 rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-slate-600 font-bold text-sm">Chargement de MARKET-CASH...</p>
-        </div>
-      </div>
-    );
-  }
-
-  const defaultHome = user ? getHomeRouteByRole(user.role) : '/login';
-
   return (
     <BrowserRouter>
       <FirestoreNetworkBanner />
       <Toaster position="top-center" />
       <Routes>
-        <Route path="/" element={<Navigate to={defaultHome} replace />} />
-        
+        {/* Public entry point: the app always opens on the welcome screen. */}
+        <Route path="/" element={<Home />} />
+
         {/* Auth Routes */}
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
