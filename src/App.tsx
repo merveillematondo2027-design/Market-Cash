@@ -14,27 +14,22 @@ import { getHomeRouteByRole } from './lib/roleNavigation';
 import { Toaster } from 'react-hot-toast';
 import FirestoreNetworkBanner from './components/FirestoreNetworkBanner';
 
-// Public page
 import Home from './pages/Home';
-
-// Layouts
 import ClientLayout from './components/layout/ClientLayout';
 import AdminLayout from './components/layout/AdminLayout';
 import AgencyLayout from './components/layout/AgencyLayout';
 import DesignerLayout from './components/layout/DesignerLayout';
 import DeliveryLayout from './components/layout/DeliveryLayout';
 
-// Auth Pages
 import Login from './pages/auth/Login';
 import Register from './pages/auth/Register';
 import PinScreen from './pages/auth/PinScreen';
 
-// Client Pages
+import ClientWallet from './pages/client/Wallet';
 import ClientCards from './pages/client/Cards';
 import ClientHelp from './pages/client/Help';
 import ClientProfile from './pages/client/Profile';
 
-// Admin Pages (Strictly admin_general)
 import AdminDashboard from './pages/admin/Dashboard';
 import AdminUsers from './pages/admin/Users';
 import AdminStock from './pages/admin/AdminStock';
@@ -48,7 +43,6 @@ import AdminDesigner from './pages/admin/AdminDesigner';
 import AdminSettings from './pages/admin/Settings';
 import { LogsCenter } from './pages/admin/LogsCenter';
 
-// Agency Pages (Strictly chef_agence & admin_general)
 import AgencyDashboard from './pages/agency/AgencyDashboard';
 import AgencyCards from './pages/agency/AgencyCards';
 import AgencyRequests from './pages/agency/AgencyRequests';
@@ -56,12 +50,10 @@ import AgencyDeliveries from './pages/agency/AgencyDeliveries';
 import AgencyNotifications from './pages/agency/AgencyNotifications';
 import AgencyProfile from './pages/agency/AgencyProfile';
 
-// Designer Pages (Strictly designer_graphique & admin_general)
 import DesignerCards from './pages/designer/DesignerCards';
 import DesignerNotifications from './pages/designer/DesignerNotifications';
 import DesignerProfile from './pages/designer/DesignerProfile';
 
-// Delivery Pages (Strictly livreur & admin_general)
 import DeliveryDashboard from './pages/delivery/DeliveryDashboard';
 import DeliveryHistory from './pages/delivery/DeliveryHistory';
 import DeliveryNotifications from './pages/delivery/DeliveryNotifications';
@@ -86,16 +78,9 @@ function RoleProtectedRoute({ children, allowedRoles }: RoleProtectedRouteProps)
     );
   }
 
-  if (!isAuthenticated || !user) {
-    return <Navigate to="/login" replace />;
-  }
+  if (!isAuthenticated || !user) return <Navigate to="/login" replace />;
+  if (user.role === 'client' && !isPinVerified) return <Navigate to="/pin" replace />;
 
-  // Clients must verify PIN before accessing client pages
-  if (user.role === 'client' && !isPinVerified) {
-    return <Navigate to="/pin" replace />;
-  }
-
-  // Check if user's role is allowed
   if (!allowedRoles.includes(user.role)) {
     const destination = getHomeRouteByRole(user.role);
     console.warn(`[ROLE_GUARD_REDIRECT] User with role '${user.role}' redirected to '${destination}'`);
@@ -142,38 +127,20 @@ export default function App() {
       <FirestoreNetworkBanner />
       <Toaster position="top-center" />
       <Routes>
-        {/* Public entry point: the app always opens on the welcome screen. */}
         <Route path="/" element={<Home />} />
-
-        {/* Auth Routes */}
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/pin" element={<PinScreen />} />
 
-        {/* 1. CLIENT ROUTES (Only client) */}
-        <Route
-          path="/client"
-          element={
-            <RoleProtectedRoute allowedRoles={['client']}>
-              <ClientLayout />
-            </RoleProtectedRoute>
-          }
-        >
-          <Route index element={<Navigate to="/client/cards" replace />} />
+        <Route path="/client" element={<RoleProtectedRoute allowedRoles={['client']}><ClientLayout /></RoleProtectedRoute>}>
+          <Route index element={<Navigate to="/client/wallet" replace />} />
+          <Route path="wallet" element={<ClientWallet />} />
           <Route path="cards" element={<ClientCards />} />
           <Route path="help" element={<ClientHelp />} />
           <Route path="profile" element={<ClientProfile />} />
         </Route>
 
-        {/* 2. ADMIN GÉNÉRAL ROUTES (Strictly admin_general) */}
-        <Route
-          path="/admin"
-          element={
-            <RoleProtectedRoute allowedRoles={['admin_general']}>
-              <AdminLayout />
-            </RoleProtectedRoute>
-          }
-        >
+        <Route path="/admin" element={<RoleProtectedRoute allowedRoles={['admin_general']}><AdminLayout /></RoleProtectedRoute>}>
           <Route index element={<Navigate to="/admin/dashboard" replace />} />
           <Route path="dashboard" element={<AdminDashboard />} />
           <Route path="users" element={<AdminUsers />} />
@@ -188,15 +155,7 @@ export default function App() {
           <Route path="logs" element={<LogsCenter />} />
         </Route>
 
-        {/* 3. CHEF D'AGENCE ROUTES (Strictly chef_agence & admin_general) */}
-        <Route
-          path="/agency"
-          element={
-            <RoleProtectedRoute allowedRoles={['chef_agence', 'admin_general']}>
-              <AgencyLayout />
-            </RoleProtectedRoute>
-          }
-        >
+        <Route path="/agency" element={<RoleProtectedRoute allowedRoles={['chef_agence', 'admin_general']}><AgencyLayout /></RoleProtectedRoute>}>
           <Route index element={<Navigate to="/agency/dashboard" replace />} />
           <Route path="dashboard" element={<AgencyDashboard />} />
           <Route path="cards" element={<AgencyCards />} />
@@ -206,15 +165,7 @@ export default function App() {
           <Route path="profile" element={<AgencyProfile />} />
         </Route>
 
-        {/* 4. DESIGNER GRAPHIQUE ROUTES */}
-        <Route
-          path="/designer"
-          element={
-            <RoleProtectedRoute allowedRoles={['designer_graphique']}>
-              <DesignerLayout />
-            </RoleProtectedRoute>
-          }
-        >
+        <Route path="/designer" element={<RoleProtectedRoute allowedRoles={['designer_graphique']}><DesignerLayout /></RoleProtectedRoute>}>
           <Route index element={<Navigate to="/designer/design" replace />} />
           <Route path="design" element={<AdminDesigner />} />
           <Route path="cards" element={<DesignerCards />} />
@@ -222,15 +173,7 @@ export default function App() {
           <Route path="profile" element={<DesignerProfile />} />
         </Route>
 
-        {/* 5. LIVREUR ROUTES (Strictly livreur & admin_general) */}
-        <Route
-          path="/delivery"
-          element={
-            <RoleProtectedRoute allowedRoles={['livreur', 'admin_general']}>
-              <DeliveryLayout />
-            </RoleProtectedRoute>
-          }
-        >
+        <Route path="/delivery" element={<RoleProtectedRoute allowedRoles={['livreur', 'admin_general']}><DeliveryLayout /></RoleProtectedRoute>}>
           <Route index element={<Navigate to="/delivery/dashboard" replace />} />
           <Route path="dashboard" element={<DeliveryDashboard />} />
           <Route path="history" element={<DeliveryHistory />} />
@@ -238,7 +181,6 @@ export default function App() {
           <Route path="profile" element={<DeliveryProfile />} />
         </Route>
 
-        {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
