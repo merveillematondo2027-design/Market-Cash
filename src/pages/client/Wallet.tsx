@@ -1,55 +1,23 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { ArrowDownToLine, ArrowUpRight, Banknote, CreditCard, History, Nfc, QrCode, ShieldCheck, Smartphone, WalletCards } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../../store/authStore';
 import { walletService } from '../../services/walletService';
-import { WalletAccount, WalletTransaction } from '../../types/wallet';
 
 const money = (value: number, currency: string) => `${value.toFixed(2)} ${currency}`;
 
 export default function ClientWallet() {
   const { user } = useAuthStore();
-  const [wallet, setWallet] = useState<WalletAccount | null>(null);
-  const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!user?.uid) return;
-    let stopWallet = () => {};
-    let stopTransactions = () => {};
-
-    walletService.ensureWallet(user.uid)
-      .then(() => {
-        stopWallet = walletService.subscribeWallet(user.uid, setWallet, error => {
-          console.error('[WALLET_LISTEN_ERROR]', error);
-          toast.error('Impossible de synchroniser le portefeuille.');
-        });
-        stopTransactions = walletService.subscribeTransactions(user.uid, setTransactions, error => {
-          console.warn('[WALLET_TX_LISTEN_ERROR]', error);
-        });
-      })
-      .catch(error => {
-        console.error('[WALLET_INIT_ERROR]', error);
-        toast.error("Le portefeuille n'a pas pu être initialisé.");
-      })
-      .finally(() => setLoading(false));
-
-    return () => {
-      stopWallet();
-      stopTransactions();
-    };
-  }, [user?.uid]);
-
+  const wallet = useMemo(() => user?.uid ? walletService.getWalletPreview(user.uid) : null, [user?.uid]);
+  const transactions = walletService.getTransactionsPreview();
   const qrPayload = useMemo(() => wallet ? `MARKET-CASH:WALLET:${wallet.localPaymentId}` : '', [wallet]);
-
-  if (loading) return <div className="p-8 text-center font-bold text-slate-500">Initialisation du portefeuille Market-Cash...</div>;
 
   if (!wallet) return <div className="p-6"><div className="rounded-3xl border border-red-200 bg-red-50 p-5 text-red-700 font-bold">Portefeuille indisponible pour le moment.</div></div>;
 
   const reservePartnerAction = (label: string) => {
-    toast(`${label} sera exécuté par GMH APIs dès que le connecteur partenaire sera activé.`, { icon: '⏳' });
+    toast(`${label} sera exécuté par GMH APIs dès que le backend et le connecteur partenaire seront activés.`, { icon: '⏳' });
   };
 
   return <div className="max-w-6xl mx-auto p-4 md:p-8 pb-28 space-y-6">
@@ -93,11 +61,11 @@ export default function ClientWallet() {
 
     <section className="rounded-3xl bg-white border border-slate-200 shadow-sm overflow-hidden">
       <div className="p-5 border-b border-slate-100 flex items-center gap-2"><History className="text-blue-800"/><h2 className="font-black text-blue-950">Activité du portefeuille</h2></div>
-      {transactions.length === 0 ? <div className="p-8 text-center text-slate-500"><ArrowDownToLine className="mx-auto mb-2"/>Aucune transaction wallet pour le moment.</div> : <div className="divide-y divide-slate-100">{transactions.map(tx => <div key={tx.id} className="p-4 flex items-center justify-between gap-3"><div><div className="font-black text-sm">{tx.description || tx.type}</div><div className="text-xs text-slate-500">{tx.reference} · {tx.status}</div></div><div className={`font-black ${tx.type === 'topup' || tx.type === 'refund' ? 'text-emerald-600' : 'text-slate-900'}`}>{tx.type === 'topup' || tx.type === 'refund' ? '+' : '-'}{money(tx.amount, tx.currency)}</div></div>)}</div>}
+      {transactions.length === 0 ? <div className="p-8 text-center text-slate-500"><ArrowDownToLine className="mx-auto mb-2"/>Aucune transaction wallet pour le moment.</div> : null}
     </section>
 
     <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-      <strong>Architecture en préparation :</strong> aucune action partenaire ne modifie directement votre solde depuis le téléphone. Les appels M-Pesa, banque et émission Visa passeront par le moteur GMH APIs puis par un backend de confiance avant écriture dans le ledger Market-Cash.
+      <strong>Fondation sécurisée :</strong> le solde affiché reste à zéro tant que le backend ledger Market-Cash n'est pas connecté. Aucune action partenaire ne peut créditer ou débiter le wallet depuis React. Les appels M-Pesa, banque et Visa passeront par le backend Market-Cash puis GMH APIs avant toute écriture comptable.
     </section>
   </div>;
 }
