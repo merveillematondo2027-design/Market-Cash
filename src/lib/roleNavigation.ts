@@ -15,7 +15,7 @@ export function getHomeRouteByRole(role?: UserRole | string | null): string {
   if (!role) return '/login';
   
   const normalized = String(role).toLowerCase().trim();
-  let targetRoute = '/client/cards';
+  let targetRoute = '/client/wallet';
 
   switch (normalized) {
     case 'admin_general':
@@ -36,7 +36,7 @@ export function getHomeRouteByRole(role?: UserRole | string | null): string {
       break;
     case 'client':
     default:
-      targetRoute = '/client/cards';
+      targetRoute = '/client/wallet';
       break;
   }
 
