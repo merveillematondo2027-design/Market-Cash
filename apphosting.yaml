@@ -4,6 +4,4 @@ scripts:
 
 outputFiles:
   serverApp:
-    include:
-      - dist
-      - server.js
+    include: [.]
