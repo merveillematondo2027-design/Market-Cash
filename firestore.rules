@@ -36,22 +36,20 @@ service cloud.firestore {
       allow delete: if isAdminGeneral();
     }
 
+    match /agent_profiles/{userId} {
+      allow read: if isOwner(userId) || isAdminGeneral();
+      allow create,update,delete: if isAdminGeneral();
+    }
+
     match /app_settings/{settingId}{ allow read: if isSignedIn(); allow write: if isAdminGeneral() || (settingId == 'card_design' && getUserRole() == 'designer_graphique'); }
     match /payment_settings/{settingId}{ allow read: if isSignedIn(); allow write: if isAdminGeneral(); }
     match /counters/global_card_counter { allow read: if isChefAgence(); allow create: if isChefAgence() && request.resource.data.keys().hasOnly(['count','lastGeneratedAt']) && request.resource.data.count is int && request.resource.data.count == 1; allow update: if isChefAgence() && request.resource.data.count == resource.data.count + 1; allow delete: if isAdminGeneral(); }
-
-    match /cards/{cardId} {
-      allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isStaff();
-      allow create: if isChefAgence(); allow delete: if isAdminGeneral();
-      allow update: if isChefAgence() || (isDesignerGraphique() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['printStatus','printedAt','printedBy','updatedAt','printFileUrl','cardDesignUrl','designUrl'])) || (isSignedIn() && resource.data.userId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']));
-    }
+    match /cards/{cardId} { allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isStaff(); allow create: if isChefAgence(); allow delete: if isAdminGeneral(); allow update: if isChefAgence() || (isDesignerGraphique() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['printStatus','printedAt','printedBy','updatedAt','printFileUrl','cardDesignUrl','designUrl'])) || (isSignedIn() && resource.data.userId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])); }
     match /card_purchase_requests/{requestId} { allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isChefAgence(); allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid && request.resource.data.urgentProcessing is bool && request.resource.data.printRequested is bool && request.resource.data.status == 'pending' && hasValidPurchasePrice() && (request.resource.data.urgentProcessing == true || (request.resource.data.identityRequired == true && request.resource.data.identityProofUrl is string && request.resource.data.identityProofUrl.size() > 0)); allow update: if isChefAgence(); allow delete: if isAdminGeneral(); }
     match /physical_card_requests/{requestId} { allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isStaff(); allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid; allow update: if isChefAgence() || (isDesignerGraphique() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','printedAt','updatedAt'])) || (isLivreur() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','deliveredAt','updatedAt','assignedLivreurId'])); allow delete: if isAdminGeneral(); }
-
     match /notifications/{notificationId} { allow read: if isSignedIn() && (isAdminGeneral() || resource.data.userId == request.auth.uid || resource.data.userId == 'all' || resource.data.userId == getUserRole()); allow create: if isSignedIn() && (isStaff() || request.resource.data.userId == request.auth.uid); allow update: if isSignedIn() && (isAdminGeneral() || resource.data.userId == request.auth.uid || resource.data.userId == 'all' || resource.data.userId == getUserRole()) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']); allow delete: if isSignedIn() && (isAdminGeneral() || resource.data.userId == request.auth.uid); }
     match /help_articles/{articleId}{ allow read: if isSignedIn(); allow write: if isAdminGeneral(); }
     match /appLogs/{logId} { allow read,delete: if isAdminGeneral(); allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid; allow update: if false; }
-
     match /{document=**}{ allow read,write: if false; }
   }
 }
