@@ -12,27 +12,84 @@ service cloud.firestore {
     function isDesignerGraphique(){ return isSignedIn() && (isAdminGeneral() || getUserRole() == 'designer_graphique'); }
     function isLivreur(){ return isSignedIn() && (isAdminGeneral() || getUserRole() == 'livreur'); }
     function isStaff(){ return isAdminGeneral() || isChefAgence() || isDesignerGraphique() || isLivreur(); }
-    function hasValidPurchasePrice(){ let pricing=get(/databases/$(database)/documents/app_settings/card_pricing).data; let cardPrice=pricing.keys().hasAny(['cardPrice'])?pricing.cardPrice:pricing.virtualCardPrice; let printingPrice=pricing.keys().hasAny(['printingPrice'])?pricing.printingPrice:pricing.physicalCardPrice; let urgencyFee=pricing.keys().hasAny(['urgencyFee'])?pricing.urgencyFee:pricing.urgentPhysicalCardPrice; return request.resource.data.amount is number && cardPrice is number && (!request.resource.data.printRequested || printingPrice is number) && (!request.resource.data.urgentProcessing || urgencyFee is number) && request.resource.data.amount == cardPrice + (request.resource.data.printRequested ? printingPrice : 0) + (request.resource.data.urgentProcessing ? urgencyFee : 0) && request.resource.data.currency == pricing.currency; }
+    function ownerUserUpdateIsSafe(){
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'displayName','phone','avatar','pinHash','useBiometrics','updatedAt'
+      ]);
+    }
+    function ownerKycUpdateIsSafe(){
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'fullName','phone','country','city','address','documentType','documentNumber',
+        'documentFrontUrl','documentBackUrl','selfieUrl','status','updatedAt'
+      ]);
+    }
+    function hasValidPurchasePrice(){
+      let pricing=get(/databases/$(database)/documents/app_settings/card_pricing).data;
+      let cardPrice=pricing.keys().hasAny(['cardPrice'])?pricing.cardPrice:pricing.virtualCardPrice;
+      let printingPrice=pricing.keys().hasAny(['printingPrice'])?pricing.printingPrice:pricing.physicalCardPrice;
+      let urgencyFee=pricing.keys().hasAny(['urgencyFee'])?pricing.urgencyFee:pricing.urgentPhysicalCardPrice;
+      return request.resource.data.amount is number
+        && cardPrice is number
+        && (!request.resource.data.printRequested || printingPrice is number)
+        && (!request.resource.data.urgentProcessing || urgencyFee is number)
+        && request.resource.data.amount == cardPrice + (request.resource.data.printRequested ? printingPrice : 0) + (request.resource.data.urgentProcessing ? urgencyFee : 0)
+        && request.resource.data.currency == pricing.currency;
+    }
 
     match /users/{userId} {
       allow read: if isOwner(userId) || isStaff();
-      allow create: if (isOwner(userId) && request.resource.data.uid == userId && (request.resource.data.role == 'client' || (isBootstrapAdminEmail() && request.resource.data.role == 'admin_general'))) || (isAdminGeneral() && request.resource.data.uid == userId && isOfficialRole(request.resource.data.role));
-      allow update: if (isOwner(userId) && request.resource.data.uid == request.auth.uid && request.resource.data.role == resource.data.role && request.resource.data.email == resource.data.email && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName','phone','avatar','pinHash','useBiometrics','updatedAt'])) || (isAdminGeneral() && request.resource.data.uid == userId && isOfficialRole(request.resource.data.role));
+      allow create: if (
+        isOwner(userId)
+        && request.resource.data.uid == userId
+        && (
+          request.resource.data.role == 'client'
+          || (isBootstrapAdminEmail() && request.resource.data.role == 'admin_general')
+        )
+      ) || (
+        isAdminGeneral()
+        && request.resource.data.uid == userId
+        && isOfficialRole(request.resource.data.role)
+      );
+      // Compatibilité avec les anciens profils: le propriétaire peut corriger ses champs
+      // personnels sans dépendre de la présence historique de uid/email/role.
+      // Les champs sensibles role/email/uid/kycStatus restent non modifiables par le client.
+      allow update: if (isOwner(userId) && ownerUserUpdateIsSafe())
+        || (isAdminGeneral() && request.resource.data.uid == userId && isOfficialRole(request.resource.data.role));
       allow delete: if isAdminGeneral();
       match /cards/{cardId}{ allow read: if isOwner(userId)||isChefAgence(); allow write: if isChefAgence(); }
     }
 
     match /kyc_requests/{userId} {
       allow read: if isOwner(userId) || isAdminGeneral() || isChefAgence();
-      allow create: if isOwner(userId) && request.resource.data.userId == request.auth.uid && request.resource.data.status == 'pending';
-      allow update: if (isOwner(userId) && resource.data.status != 'approved' && request.resource.data.userId == request.auth.uid && request.resource.data.status == 'pending' && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fullName','phone','birthDate','country','city','address','documentType','documentNumber','documentFrontUrl','documentBackUrl','selfieUrl','status','updatedAt'])) || isAdminGeneral() || isChefAgence();
+      allow create: if isOwner(userId)
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == 'pending';
+      allow update: if (
+        isOwner(userId)
+        && resource.data.status != 'approved'
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && ownerKycUpdateIsSafe()
+      ) || isAdminGeneral() || isChefAgence();
       allow delete: if isAdminGeneral();
     }
 
     match /account_upgrade_requests/{userId} {
       allow read: if isOwner(userId) || isAdminGeneral();
-      allow create: if isOwner(userId) && request.resource.data.userId == request.auth.uid && request.resource.data.requestedType in ['agent','marchand'] && request.resource.data.status == 'pending' && get(/databases/$(database)/documents/kyc_requests/$(request.auth.uid)).data.status == 'approved';
-      allow update: if (isOwner(userId) && resource.data.status != 'approved' && request.resource.data.userId == request.auth.uid && request.resource.data.status == 'pending' && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['requestedType','legalName','activity','phone','city','address','registrationNumber','reason','status','updatedAt'])) || isAdminGeneral();
+      allow create: if isOwner(userId)
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.requestedType in ['agent','marchand']
+        && request.resource.data.status == 'pending'
+        && get(/databases/$(database)/documents/kyc_requests/$(request.auth.uid)).data.status == 'approved';
+      allow update: if (
+        isOwner(userId)
+        && resource.data.status != 'approved'
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'requestedType','legalName','activity','phone','city','address','registrationNumber','reason','status','updatedAt'
+        ])
+      ) || isAdminGeneral();
       allow delete: if isAdminGeneral();
     }
 
@@ -43,13 +100,56 @@ service cloud.firestore {
 
     match /app_settings/{settingId}{ allow read: if isSignedIn(); allow write: if isAdminGeneral() || (settingId == 'card_design' && getUserRole() == 'designer_graphique'); }
     match /payment_settings/{settingId}{ allow read: if isSignedIn(); allow write: if isAdminGeneral(); }
-    match /counters/global_card_counter { allow read: if isChefAgence(); allow create: if isChefAgence() && request.resource.data.keys().hasOnly(['count','lastGeneratedAt']) && request.resource.data.count is int && request.resource.data.count == 1; allow update: if isChefAgence() && request.resource.data.count == resource.data.count + 1; allow delete: if isAdminGeneral(); }
-    match /cards/{cardId} { allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isStaff(); allow create: if isChefAgence(); allow delete: if isAdminGeneral(); allow update: if isChefAgence() || (isDesignerGraphique() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['printStatus','printedAt','printedBy','updatedAt','printFileUrl','cardDesignUrl','designUrl'])) || (isSignedIn() && resource.data.userId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])); }
-    match /card_purchase_requests/{requestId} { allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isChefAgence(); allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid && request.resource.data.urgentProcessing is bool && request.resource.data.printRequested is bool && request.resource.data.status == 'pending' && hasValidPurchasePrice() && (request.resource.data.urgentProcessing == true || (request.resource.data.identityRequired == true && request.resource.data.identityProofUrl is string && request.resource.data.identityProofUrl.size() > 0)); allow update: if isChefAgence(); allow delete: if isAdminGeneral(); }
-    match /physical_card_requests/{requestId} { allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isStaff(); allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid; allow update: if isChefAgence() || (isDesignerGraphique() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','printedAt','updatedAt'])) || (isLivreur() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','deliveredAt','updatedAt','assignedLivreurId'])); allow delete: if isAdminGeneral(); }
-    match /notifications/{notificationId} { allow read: if isSignedIn() && (isAdminGeneral() || resource.data.userId == request.auth.uid || resource.data.userId == 'all' || resource.data.userId == getUserRole()); allow create: if isSignedIn() && (isStaff() || request.resource.data.userId == request.auth.uid); allow update: if isSignedIn() && (isAdminGeneral() || resource.data.userId == request.auth.uid || resource.data.userId == 'all' || resource.data.userId == getUserRole()) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']); allow delete: if isSignedIn() && (isAdminGeneral() || resource.data.userId == request.auth.uid); }
+    match /counters/global_card_counter {
+      allow read: if isChefAgence();
+      allow create: if isChefAgence() && request.resource.data.keys().hasOnly(['count','lastGeneratedAt']) && request.resource.data.count is int && request.resource.data.count == 1;
+      allow update: if isChefAgence() && request.resource.data.count == resource.data.count + 1;
+      allow delete: if isAdminGeneral();
+    }
+    match /cards/{cardId} {
+      allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isStaff();
+      allow create: if isChefAgence();
+      allow delete: if isAdminGeneral();
+      allow update: if isChefAgence()
+        || (isDesignerGraphique() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['printStatus','printedAt','printedBy','updatedAt','printFileUrl','cardDesignUrl','designUrl']))
+        || (isSignedIn() && resource.data.userId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']));
+    }
+    match /card_purchase_requests/{requestId} {
+      allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isChefAgence();
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.urgentProcessing is bool
+        && request.resource.data.printRequested is bool
+        && request.resource.data.status == 'pending'
+        && hasValidPurchasePrice()
+        && (request.resource.data.urgentProcessing == true || (request.resource.data.identityRequired == true && request.resource.data.identityProofUrl is string && request.resource.data.identityProofUrl.size() > 0));
+      allow update: if isChefAgence();
+      allow delete: if isAdminGeneral();
+    }
+    match /physical_card_requests/{requestId} {
+      allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isStaff();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isChefAgence()
+        || (isDesignerGraphique() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','printedAt','updatedAt']))
+        || (isLivreur() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','deliveredAt','updatedAt','assignedLivreurId']));
+      allow delete: if isAdminGeneral();
+    }
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && (isAdminGeneral() || resource.data.userId == request.auth.uid || resource.data.userId == 'all' || resource.data.userId == getUserRole());
+      allow create: if isSignedIn() && (isStaff() || request.resource.data.userId == request.auth.uid);
+      allow update: if isSignedIn() && (isAdminGeneral() || resource.data.userId == request.auth.uid || resource.data.userId == 'all' || resource.data.userId == getUserRole()) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow delete: if isSignedIn() && (isAdminGeneral() || resource.data.userId == request.auth.uid);
+    }
     match /help_articles/{articleId}{ allow read: if isSignedIn(); allow write: if isAdminGeneral(); }
-    match /appLogs/{logId} { allow read,delete: if isAdminGeneral(); allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid; allow update: if false; }
+    match /appLogs/{logId} {
+      allow read,delete: if isAdminGeneral();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if false;
+    }
+
+    // Les collections monétaires (wallet_accounts, wallet_transactions, ledger_entries,
+    // card_wallet_accounts, wallet_public_ids...) sont volontairement absentes des droits
+    // client. Elles sont écrites par Cloud Functions via Admin SDK.
     match /{document=**}{ allow read,write: if false; }
   }
 }
