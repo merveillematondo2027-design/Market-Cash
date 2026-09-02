@@ -1,0 +1,52 @@
+name: Firebase Infrastructure Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'firestore.rules'
+      - 'firestore.indexes.json'
+      - 'storage.rules'
+      - 'firebase.json'
+      - 'functions/**'
+      - '.github/workflows/firebase-deploy.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: firebase-production-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Firebase CLI
+        run: npm install --global firebase-tools
+
+      - name: Install Functions dependencies
+        working-directory: functions
+        run: npm ci --no-audit --no-fund
+
+      - name: Build Functions
+        working-directory: functions
+        run: npm run build
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_AUTOMARKET_FINTECH }}'
+
+      - name: Deploy Firestore, Storage and Functions
+        run: firebase deploy --project automarket-fintech --only firestore:rules,firestore:indexes,storage,functions --non-interactive
