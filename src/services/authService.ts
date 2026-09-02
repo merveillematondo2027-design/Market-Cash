@@ -43,6 +43,8 @@ export function formatAuthError(error:any):string{
     case'auth/wrong-password':case'auth/invalid-credential':return'Identifiants incorrects. Vérifiez votre adresse email et votre mot de passe.';
     case'auth/popup-closed-by-user':return'La fenêtre de connexion Google a été fermée avant la finalisation.';
     case'auth/popup-blocked':return'La fenêtre de connexion a été bloquée par votre navigateur. Veuillez autoriser les pop-ups.';
+    case'auth/unauthorized-domain':return'Ce domaine doit être autorisé dans Firebase Authentication avant la connexion Google. La connexion par email reste disponible.';
+    case'auth/operation-not-allowed':return'Cette méthode de connexion n’est pas encore activée dans Firebase Authentication.';
     case'auth/network-request-failed':return'Erreur réseau. Veuillez vérifier votre connexion internet et réessayer.';
     case'auth/too-many-requests':return'Trop de tentatives échouées. Veuillez patienter avant de réessayer.';
     case'auth/user-disabled':return"Ce compte a été désactivé par l'administrateur.";
@@ -87,8 +89,6 @@ export const authService={
         if(!isFirestoreAccessError(error))throw error;
         const fallback=buildSessionUser(firebaseUser,additionalData);
         console.warn('[USER_PROFILE_FALLBACK]',{uid,email,code:error?.code,message:error?.message});
-        // Firebase Auth remains authoritative for the active session. We keep the user signed in
-        // instead of converting a Firestore rules/network incident into a broken login screen.
         return fallback;
       }finally{resolvingUsers.delete(uid)}
     })();
