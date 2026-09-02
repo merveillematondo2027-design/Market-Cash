@@ -64,13 +64,28 @@ export interface WalletApiRoute {
   description: string;
 }
 
+/**
+ * Market-Cash physical card is a closed-loop Market-Cash credential, NOT Visa.
+ * It is linked to one wallet currency and initially has no expiry date.
+ * Sensitive values must eventually be generated/stored by a trusted backend,
+ * never exposed in logs or created by the browser.
+ */
 export interface MarketCashPhysicalCredential {
+  id: string;
   userId: string;
   walletId: string;
-  localPaymentId: string;
+  currency: WalletCurrency;
+  holderName: string;
+  cardNumber: string; // 16 digits, Market-Cash namespace
+  securityCode: string; // 3 digits; secret, never log
+  expiresAt: null;
+  network: 'market_cash';
+  type: 'physical';
   qrPayload: string;
   nfcMode: 'market_cash_closed_loop';
   status: 'planned' | 'active' | 'blocked';
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface MarketCashVisaCredential {

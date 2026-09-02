@@ -2,48 +2,19 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { initializeFirestore, type Firestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
+import { getFunctions } from 'firebase/functions';
 import config from '../../firebase-applet-config.json';
 
-const firebaseConfig = {
-  apiKey: config.apiKey,
-  authDomain: config.authDomain,
-  projectId: config.projectId,
-  storageBucket: config.storageBucket,
-  messagingSenderId: config.messagingSenderId,
-  appId: config.appId,
-};
-
-console.log('[FIREBASE_INIT]', {
-  projectId: config.projectId,
-  appId: config.appId,
-  firestoreDatabaseId: config.firestoreDatabaseId
-});
-
-// Singleton Firebase App instance
+const firebaseConfig = { apiKey: config.apiKey, authDomain: config.authDomain, projectId: config.projectId, storageBucket: config.storageBucket, messagingSenderId: config.messagingSenderId, appId: config.appId };
+console.log('[FIREBASE_INIT]', { projectId: config.projectId, appId: config.appId, firestoreDatabaseId: config.firestoreDatabaseId });
 export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-
-// Conserve la même instance pendant les réévaluations HMR de Vite. Cela évite
-// de rappeler initializeFirestore sur la Firebase App déjà initialisée.
 const firebaseRuntime = globalThis as typeof globalThis & { __marketCashFirestore?: Firestore };
-export const db = firebaseRuntime.__marketCashFirestore || initializeFirestore(app, {
-  experimentalAutoDetectLongPolling: true,
-}, config.firestoreDatabaseId);
+export const db = firebaseRuntime.__marketCashFirestore || initializeFirestore(app, { experimentalAutoDetectLongPolling: true }, config.firestoreDatabaseId);
 firebaseRuntime.__marketCashFirestore = db;
-
-console.log('[FIRESTORE_INIT]', {
-  databaseId: config.firestoreDatabaseId
-});
-
-console.log('[FIRESTORE_NETWORK_STATUS]', {
-  status: 'initialized',
-  transport: 'auto-detect-long-polling'
-});
-
+console.log('[FIRESTORE_INIT]', { databaseId: config.firestoreDatabaseId });
+console.log('[FIRESTORE_NETWORK_STATUS]', { status: 'initialized', transport: 'auto-detect-long-polling' });
 export const auth = getAuth(app);
 export const storage = getStorage(app);
-
+export const functions = getFunctions(app, 'europe-west1');
 export const googleProvider = new GoogleAuthProvider();
-googleProvider.setCustomParameters({
-  prompt: 'select_account'
-});
-
+googleProvider.setCustomParameters({ prompt: 'select_account' });
