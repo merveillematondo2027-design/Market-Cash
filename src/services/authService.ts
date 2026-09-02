@@ -6,7 +6,6 @@ import { User, UserRole } from '../types';
 import { removeUndefined } from '../lib/firestoreUtils';
 
 export const ADMIN_EMAIL='merveillematondo2027@gmail.com';
-const CUSTOMER_ROLES:UserRole[]=['client','agent','marchand'];
 
 export function formatAuthError(error:any):string{
   if(!error)return'Une erreur inattendue est survenue.';
@@ -23,7 +22,7 @@ export function formatAuthError(error:any):string{
     case'auth/network-request-failed':return'Erreur réseau. Veuillez vérifier votre connexion internet et réessayer.';
     case'auth/too-many-requests':return'Trop de tentatives échouées. Veuillez patienter avant de réessayer.';
     case'auth/user-disabled':return"Ce compte a été désactivé par l'administrateur.";
-    default:if(message.includes('Missing or insufficient permissions')||message.includes('permission-denied'))return"Erreur de permissions d'accès aux données.";return message||"Une erreur est survenue lors de l'authentification.";
+    default:if(message.includes('Missing or insufficient permissions')||message.includes('permission-denied'))return"Votre session Firebase est ouverte, mais le profil Market-Cash n'est pas accessible. Réessayez après actualisation.";return message||"Une erreur est survenue lors de l'authentification.";
   }
 }
 
@@ -44,16 +43,20 @@ export const authService={
           await setDoc(userRef,removeUndefined(newUser));
           return newUser;
         }
-        const data=snapshot.data() as User;
-        const isMainAdmin=email.toLowerCase()===ADMIN_EMAIL.toLowerCase();
-        if(isMainAdmin&&data.role!=='admin_general'){
-          data.role='admin_general';data.updatedAt=Date.now();await setDoc(userRef,{role:'admin_general',updatedAt:data.updatedAt},{merge:true});
-        }else if(!isMainAdmin&&!CUSTOMER_ROLES.includes(data.role)){
-          // Baseline migration: all former staff accounts return to simple client.
-          data.role='client';data.agencyId=undefined;data.agencyName=undefined;data.updatedAt=Date.now();
-          await setDoc(userRef,{role:'client',agencyId:null,agencyName:null,updatedAt:data.updatedAt},{merge:true});
+
+        // IMPORTANT: resolving a session must be read-only for normal users.
+        // Previous code attempted role/KYC migrations here. Firestore correctly rejects
+        // those privileged/self-service writes, which made a valid Firebase login look broken.
+        const stored=snapshot.data() as User;
+        const data:User={...stored,uid:stored.uid||uid,email:stored.email||email,displayName:stored.displayName||firebaseUser.displayName||email.split('@')[0]||'Utilisateur',phone:stored.phone||firebaseUser.phoneNumber||'',avatar:stored.avatar||firebaseUser.photoURL||'',pinHash:stored.pinHash||'',kycStatus:stored.kycStatus||'not_started',createdAt:stored.createdAt||Date.now(),updatedAt:stored.updatedAt||Date.now()};
+
+        // The bootstrap administrator may repair only its own admin role; the rules explicitly
+        // authorize this identity. No other role migration is performed from the browser.
+        if(email.toLowerCase()===ADMIN_EMAIL.toLowerCase()&&data.role!=='admin_general'){
+          data.role='admin_general';data.updatedAt=Date.now();
+          await setDoc(userRef,{role:'admin_general',updatedAt:data.updatedAt},{merge:true});
         }
-        if(!data.kycStatus){data.kycStatus='not_started';await setDoc(userRef,{kycStatus:'not_started',updatedAt:Date.now()},{merge:true});}
+
         logService.success('AUTH','USER_PROFILE_FOUND','Profil utilisateur trouvé',{userId:data.uid,userEmail:data.email,userRole:data.role});
         return data;
       }finally{resolvingUsers.delete(uid)}
@@ -71,7 +74,11 @@ export const authService={
     return{firebaseUser:result.user,user:newUser};
   },
 
-  async login(email:string,password:string){const result=await signInWithEmailAndPassword(auth,email.trim(),password);return{firebaseUser:result.user}},
+  async login(email:string,password:string){
+    const result=await signInWithEmailAndPassword(auth,email.trim(),password);
+    const userDoc=await this.resolveUser(result.user);
+    return{firebaseUser:result.user,user:userDoc};
+  },
   async loginWithGoogle(){googleProvider.setCustomParameters({prompt:'select_account'});const result=await signInWithPopup(auth,googleProvider);const userDoc=await this.resolveUser(result.user);return{firebaseUser:result.user,user:userDoc}},
   async logout(){await signOut(auth);if(typeof window!=='undefined'){try{localStorage.removeItem('market_cash_user');sessionStorage.clear()}catch{}}}
 };
