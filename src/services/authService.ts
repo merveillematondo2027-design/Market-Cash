@@ -7,6 +7,30 @@ import { removeUndefined } from '../lib/firestoreUtils';
 
 export const ADMIN_EMAIL='merveillematondo2027@gmail.com';
 
+function isFirestoreAccessError(error:any){
+  const code=String(error?.code||'');
+  const message=String(error?.message||'');
+  return code==='permission-denied'||code==='firestore/permission-denied'||code==='unavailable'||code==='firestore/unavailable'||message.includes('Missing or insufficient permissions')||message.includes('permission-denied');
+}
+
+function buildSessionUser(firebaseUser:FirebaseUser,additionalData:Partial<User>={}):User{
+  const email=(firebaseUser.email||'').trim();
+  const role:UserRole=email.toLowerCase()===ADMIN_EMAIL.toLowerCase()?'admin_general':'client';
+  return {
+    uid:firebaseUser.uid,
+    email,
+    displayName:additionalData.displayName||firebaseUser.displayName||email.split('@')[0]||'Utilisateur',
+    phone:additionalData.phone||firebaseUser.phoneNumber||'',
+    avatar:additionalData.avatar||firebaseUser.photoURL||'',
+    role,
+    pinHash:additionalData.pinHash||'',
+    kycStatus:additionalData.kycStatus||'not_started',
+    createdAt:additionalData.createdAt||Date.now(),
+    updatedAt:Date.now(),
+    ...additionalData
+  };
+}
+
 export function formatAuthError(error:any):string{
   if(!error)return'Une erreur inattendue est survenue.';
   const code=error.code||'';const message=error.message||'';
@@ -22,7 +46,7 @@ export function formatAuthError(error:any):string{
     case'auth/network-request-failed':return'Erreur réseau. Veuillez vérifier votre connexion internet et réessayer.';
     case'auth/too-many-requests':return'Trop de tentatives échouées. Veuillez patienter avant de réessayer.';
     case'auth/user-disabled':return"Ce compte a été désactivé par l'administrateur.";
-    default:if(message.includes('Missing or insufficient permissions')||message.includes('permission-denied'))return"Votre session Firebase est ouverte, mais le profil Market-Cash n'est pas accessible. Réessayez après actualisation.";return message||"Une erreur est survenue lors de l'authentification.";
+    default:if(isFirestoreAccessError(error))return"Connexion Firebase réussie. Certaines données Market-Cash sont momentanément indisponibles; réessayez dans quelques instants.";return message||"Une erreur est survenue lors de l'authentification.";
   }
 }
 
@@ -38,27 +62,34 @@ export const authService={
       try{
         const snapshot=await getDoc(userRef);
         if(!snapshot.exists()){
-          const role:UserRole=email.toLowerCase()===ADMIN_EMAIL.toLowerCase()?'admin_general':'client';
-          const newUser:User={uid,email,displayName:additionalData.displayName||firebaseUser.displayName||email.split('@')[0]||'Utilisateur',phone:additionalData.phone||firebaseUser.phoneNumber||'',avatar:additionalData.avatar||firebaseUser.photoURL||'',role,pinHash:additionalData.pinHash||'',kycStatus:'not_started',createdAt:Date.now(),updatedAt:Date.now(),...additionalData};
-          await setDoc(userRef,removeUndefined(newUser));
+          const newUser=buildSessionUser(firebaseUser,additionalData);
+          try{
+            await setDoc(userRef,removeUndefined(newUser));
+            logService.success('AUTH','USER_PROFILE_CREATED','Profil utilisateur créé',{userId:uid,userEmail:email,userRole:newUser.role});
+          }catch(error:any){
+            if(!isFirestoreAccessError(error))throw error;
+            console.warn('[USER_PROFILE_CREATE_DEFERRED]',{uid,code:error?.code});
+          }
           return newUser;
         }
 
-        // IMPORTANT: resolving a session must be read-only for normal users.
-        // Previous code attempted role/KYC migrations here. Firestore correctly rejects
-        // those privileged/self-service writes, which made a valid Firebase login look broken.
         const stored=snapshot.data() as User;
-        const data:User={...stored,uid:stored.uid||uid,email:stored.email||email,displayName:stored.displayName||firebaseUser.displayName||email.split('@')[0]||'Utilisateur',phone:stored.phone||firebaseUser.phoneNumber||'',avatar:stored.avatar||firebaseUser.photoURL||'',pinHash:stored.pinHash||'',kycStatus:stored.kycStatus||'not_started',createdAt:stored.createdAt||Date.now(),updatedAt:stored.updatedAt||Date.now()};
+        const data:User={...buildSessionUser(firebaseUser,additionalData),...stored,uid:stored.uid||uid,email:stored.email||email,displayName:stored.displayName||firebaseUser.displayName||email.split('@')[0]||'Utilisateur',phone:stored.phone||firebaseUser.phoneNumber||'',avatar:stored.avatar||firebaseUser.photoURL||'',pinHash:stored.pinHash||'',kycStatus:stored.kycStatus||'not_started',createdAt:stored.createdAt||Date.now(),updatedAt:stored.updatedAt||Date.now()};
 
-        // The bootstrap administrator may repair only its own admin role; the rules explicitly
-        // authorize this identity. No other role migration is performed from the browser.
         if(email.toLowerCase()===ADMIN_EMAIL.toLowerCase()&&data.role!=='admin_general'){
           data.role='admin_general';data.updatedAt=Date.now();
-          await setDoc(userRef,{role:'admin_general',updatedAt:data.updatedAt},{merge:true});
+          try{await setDoc(userRef,{role:'admin_general',updatedAt:data.updatedAt},{merge:true})}catch(error:any){if(!isFirestoreAccessError(error))throw error}
         }
 
         logService.success('AUTH','USER_PROFILE_FOUND','Profil utilisateur trouvé',{userId:data.uid,userEmail:data.email,userRole:data.role});
         return data;
+      }catch(error:any){
+        if(!isFirestoreAccessError(error))throw error;
+        const fallback=buildSessionUser(firebaseUser,additionalData);
+        console.warn('[USER_PROFILE_FALLBACK]',{uid,email,code:error?.code,message:error?.message});
+        // Firebase Auth remains authoritative for the active session. We keep the user signed in
+        // instead of converting a Firestore rules/network incident into a broken login screen.
+        return fallback;
       }finally{resolvingUsers.delete(uid)}
     })();
     resolvingUsers.set(uid,resolvePromise);return resolvePromise;
@@ -68,9 +99,13 @@ export const authService={
     const cleanEmail=email.trim();
     const result=await createUserWithEmailAndPassword(auth,cleanEmail,password);
     if(displayName.trim())try{await updateProfile(result.user,{displayName:displayName.trim()})}catch{}
-    const role:UserRole=cleanEmail.toLowerCase()===ADMIN_EMAIL.toLowerCase()?'admin_general':'client';
-    const newUser:User={uid:result.user.uid,email:cleanEmail,displayName:displayName.trim()||'Client',phone:phone.trim()||'',avatar:'',role,pinHash:'',kycStatus:'not_started',createdAt:Date.now(),updatedAt:Date.now()};
-    await setDoc(doc(db,'users',result.user.uid),removeUndefined(newUser));
+    const newUser=buildSessionUser(result.user,{displayName:displayName.trim()||'Client',phone:phone.trim()||''});
+    try{
+      await setDoc(doc(db,'users',result.user.uid),removeUndefined(newUser));
+    }catch(error:any){
+      if(!isFirestoreAccessError(error))throw error;
+      console.warn('[REGISTER_PROFILE_WRITE_DEFERRED]',{uid:result.user.uid,code:error?.code});
+    }
     return{firebaseUser:result.user,user:newUser};
   },
 
