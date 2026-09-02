@@ -1,0 +1,5 @@
+import React,{useEffect,useState}from'react';
+import{WalletCards}from'lucide-react';
+import{useAuthStore}from'../../store/authStore';
+import{agentWalletService}from'../../services/agentWalletService';
+export default function AgentProfile(){const{user}=useAuthStore();const[recharge,setRecharge]=useState('');useEffect(()=>{agentWalletService.ensureWalletProfile().then(r=>setRecharge(r.data.rechargeNumber)).catch(()=>{});},[]);return <div className="max-w-xl mx-auto p-4 md:p-8"><h1 className="text-2xl font-black text-blue-950">Profil agent</h1><div className="mt-4 rounded-3xl bg-white border p-5 shadow-sm"><div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-800 grid place-items-center"><WalletCards/></div><h2 className="font-black text-lg mt-3">{user?.displayName||'Agent Market-Cash'}</h2><p className="text-sm text-slate-500">{user?.email}</p><p className="text-xs text-slate-400 mt-1">{user?.phone}</p>{recharge&&<div className="mt-4 rounded-2xl bg-slate-50 p-4"><p className="text-[10px] font-black text-slate-400 uppercase">Numéro interne</p><p className="font-mono font-black text-blue-950">{recharge}</p></div>}</div></div>}
