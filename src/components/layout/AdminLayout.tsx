@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { Boxes, FileClock, LayoutDashboard, Library, Menu, ScrollText, Settings, Shield, Truck, User, Users, X } from 'lucide-react';
+import { Boxes, FileClock, HandCoins, LayoutDashboard, Library, Menu, ScrollText, Settings, Shield, Truck, User, Users, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAuthStore } from '../../store/authStore';
 
@@ -12,6 +12,7 @@ export default function AdminLayout() {
   const navItems = [
     { name: 'Accueil', path: '/admin/dashboard', icon: LayoutDashboard },
     { name: 'Clients', path: '/admin/users', icon: Users },
+    { name: 'Agents & Float', path: '/admin/agents', icon: HandCoins },
     { name: 'Demandes', path: '/admin/requests', icon: FileClock },
     { name: 'Stock', path: '/admin/stock', icon: Boxes },
     { name: 'Livraisons', path: '/admin/deliveries', icon: Truck },
