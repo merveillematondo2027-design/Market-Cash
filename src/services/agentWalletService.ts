@@ -11,6 +11,7 @@ export interface RechargeClientLookup {
 }
 export interface WalletServerSnapshot {
   rechargeNumber: string;
+  marketCashId?: string;
   isAgent: boolean;
   wallets: Record<WalletCurrency, {
     id: string;
@@ -22,6 +23,7 @@ export interface WalletServerSnapshot {
     heldBalance: number;
     status: string;
     rechargeNumber: string;
+    marketCashId?: string;
   }>;
 }
 export interface MarketCashIdentity { marketCashId: string; }
@@ -34,6 +36,24 @@ export interface InternalCardSummary {
   status: string;
   balances: Partial<Record<WalletCurrency, number>>;
 }
+export interface WalletDepositRequest {
+  requestId: string;
+  userId: string;
+  walletId: string;
+  rail: 'mobile_money' | 'bank';
+  currency: WalletCurrency;
+  amount: number;
+  network?: string | null;
+  phone?: string | null;
+  bank?: string | null;
+  orchestrator: 'MHT_APIS';
+  integration?: 'mht' | 'reserved';
+  status: string;
+  providerReference?: string | null;
+  pushRequested?: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
 
 const call = <TReq,TRes>(name:string) => httpsCallable<TReq,TRes>(functions,name);
 export const agentWalletService = {
@@ -45,6 +65,7 @@ export const agentWalletService = {
   getMyInternalCards: async() => (await call<Record<string,never>,{cards:InternalCardSummary[]}>('getMyInternalCards')({})).data.cards,
   fundInternalCard: async(input:{cardId:string;currency:WalletCurrency;amount:number;pin:string;idempotencyKey:string}) => (await call<typeof input,{ok:boolean;reference:string;transactionId:string}>('walletToInternalCard')(input)).data,
   getMyWalletHistory: async() => (await call<Record<string,never>,{transactions:any[]}>('getMyWalletHistory')({})).data.transactions,
+  createWalletDeposit: async(input:{rail:'mobile_money'|'bank';currency:WalletCurrency;amount:number;network?:string;phone?:string;bank?:string;idempotencyKey:string}) => (await call<typeof input,WalletDepositRequest>('createWalletDeposit')(input)).data,
   lookupClient: async(rechargeNumber:string) => (await call<{rechargeNumber:string},RechargeClientLookup>('lookupRechargeClient')({rechargeNumber})).data,
   cashIn: async(input:{rechargeNumber:string;currency:WalletCurrency;amount:number;pin:string;idempotencyKey:string}) => (await call<typeof input,{ok:boolean;reference:string;transactionId:string}>('agentCashIn')(input)).data,
   cashOut: async(input:{rechargeNumber:string;currency:WalletCurrency;amount:number;pin:string;idempotencyKey:string}) => (await call<typeof input,{ok:boolean;reference:string;transactionId:string}>('agentCashOut')(input)).data,
