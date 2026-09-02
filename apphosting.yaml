@@ -1,0 +1,9 @@
+scripts:
+  buildCommand: npm run build
+  runCommand: node server.js
+
+outputFiles:
+  serverApp:
+    include:
+      - dist
+      - server.js
