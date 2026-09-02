@@ -1,137 +1,55 @@
+import { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Library, Truck, User, Shield } from 'lucide-react';
+import { Boxes, FileClock, LayoutDashboard, Library, Menu, ScrollText, Settings, Shield, Truck, User, Users, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAuthStore } from '../../store/authStore';
 
 export default function AdminLayout() {
   const location = useLocation();
   const { user } = useAuthStore();
+  const [showMenu, setShowMenu] = useState(false);
 
-  
   const navItems = [
-    { name: 'Accueil', fullName: 'Accueil', path: '/admin/dashboard', icon: LayoutDashboard },
-    { name: 'Bibliothèque', fullName: 'Bibliothèque', path: '/admin/library', icon: Library },
-    { name: 'Livraison', fullName: 'Livraison', path: '/admin/deliveries', icon: Truck },
-    { name: 'Profil', fullName: 'Profil', path: '/admin/profile', icon: User },
+    { name: 'Accueil', path: '/admin/dashboard', icon: LayoutDashboard },
+    { name: 'Clients', path: '/admin/users', icon: Users },
+    { name: 'Demandes', path: '/admin/requests', icon: FileClock },
+    { name: 'Stock', path: '/admin/stock', icon: Boxes },
+    { name: 'Livraisons', path: '/admin/deliveries', icon: Truck },
+    { name: 'Bibliothèque', path: '/admin/library', icon: Library },
+    { name: 'Journaux', path: '/admin/logs', icon: ScrollText },
+    { name: 'Paramètres', path: '/admin/settings', icon: Settings },
+    { name: 'Profil', path: '/admin/profile', icon: User },
   ];
 
+  const primary = navItems.slice(0, 4);
+  const active = (path: string) => location.pathname.startsWith(path);
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans text-slate-800 antialiased selection:bg-blue-600 selection:text-white">
-      {/* Mobile Header */}
-      <header className="md:hidden bg-blue-950 text-white px-4 py-3 flex justify-between items-center z-20 sticky top-0 shadow-md">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 bg-amber-400 rounded-xl flex items-center justify-center border-2 border-blue-950 shadow-sm text-blue-950">
-            <Shield size={16} />
-          </div>
-          <div>
-            <div className="font-black text-sm tracking-tight text-white flex items-center gap-1.5">
-              <span>MARKET-CASH</span>
-              <span className="text-[9px] bg-blue-700 text-white px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider">
-                Admin
-              </span>
-            </div>
-            <p className="text-[9px] text-blue-200 truncate max-w-[200px]">
-              {user?.displayName || user?.email}
-            </p>
-          </div>
+    <div className="min-h-screen bg-slate-50 text-slate-800 antialiased md:flex">
+      <header className="md:hidden sticky top-0 z-40 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4">
+        <div className="flex items-center gap-3">
+          <div className="grid h-9 w-9 place-items-center rounded-xl bg-blue-950 text-white"><Shield size={18}/></div>
+          <div><div className="text-sm font-black text-slate-950">MARKET-CASH</div><div className="text-[10px] font-semibold text-slate-500">Administration générale</div></div>
         </div>
+        <button onClick={() => setShowMenu(true)} className="rounded-xl p-2.5 text-slate-600 hover:bg-slate-100" aria-label="Menu administration"><Menu size={21}/></button>
       </header>
 
-      {/* Desktop Sidebar */}
-      <aside className="hidden md:flex flex-col w-64 bg-blue-950 border-r border-blue-900 min-h-screen shrink-0 text-white">
-        <div className="p-6">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 bg-amber-400 rounded-2xl flex items-center justify-center text-blue-950 font-black shadow-md">
-              <Shield size={22} />
-            </div>
-            <div>
-              <h1 className="text-amber-400 text-xl font-black tracking-tight leading-none">
-                MARKET-CASH
-              </h1>
-              <span className="text-[10px] text-blue-300 font-bold uppercase tracking-widest block mt-0.5">
-                Administration Générale
-              </span>
-            </div>
-          </div>
+      <aside className="hidden md:flex md:w-64 md:shrink-0 md:flex-col md:border-r md:border-slate-200 md:bg-white md:min-h-screen">
+        <div className="border-b border-slate-100 p-6">
+          <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-950 text-white"><Shield size={20}/></div><div><div className="font-black text-slate-950">MARKET-CASH</div><div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Administration</div></div></div>
         </div>
-
-        <nav className="flex-1 px-3 space-y-1.5 mt-2">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = location.pathname.startsWith(item.path);
-            return (
-              <Link
-                key={item.name}
-                to={item.path}
-                className={cn(
-                  'flex items-center gap-3 px-4 py-3 rounded-2xl transition-all text-sm font-bold',
-                  isActive 
-                    ? 'bg-blue-900 text-amber-400 shadow-md border-l-4 border-amber-400' 
-                    : 'text-blue-200 hover:bg-blue-900/40 hover:text-white'
-                )}
-              >
-                <Icon size={20} />
-                <span>{item.fullName}</span>
-              </Link>
-            );
-          })}
-        </nav>
-
-        {/* Quick Admin Indicator in sidebar */}
-        <div className="p-4 m-3 bg-blue-900/50 rounded-2xl border border-blue-800/60 text-xs text-blue-200">
-          <div className="flex items-center gap-2 text-amber-400 font-bold mb-1">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>Système Actif</span>
-          </div>
-          <p className="text-[11px] text-blue-300 leading-tight">
-            Market-Cash v2.4 • Plateforme RDC
-          </p>
-        </div>
+        <nav className="flex-1 space-y-1 p-3">{navItems.map(item=>{const I=item.icon;const isActive=active(item.path);return <Link key={item.path} to={item.path} className={cn('flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold transition',isActive?'bg-blue-950 text-white':'text-slate-600 hover:bg-slate-100 hover:text-slate-950')}><I size={18}/><span>{item.name}</span></Link>})}</nav>
+        <div className="m-4 rounded-2xl bg-slate-50 p-4 text-xs text-slate-500"><div className="font-bold text-slate-800">Session administrateur</div><div className="mt-1 truncate">{user?.displayName || user?.email}</div><div className="mt-3 flex items-center gap-2 font-semibold text-emerald-700"><span className="h-2 w-2 rounded-full bg-emerald-500"/> Système actif</div></div>
       </aside>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col relative min-h-screen overflow-x-hidden pb-28 md:pb-8">
-        <main className="flex-1 p-3 sm:p-5 md:p-6 lg:p-8 max-w-7xl w-full mx-auto">
-          <Outlet />
-        </main>
-      </div>
+      <main className="min-w-0 flex-1 p-3 pb-24 sm:p-5 sm:pb-24 md:p-6 lg:p-8"><div className="mx-auto max-w-7xl"><Outlet/></div></main>
 
-      {/* Mobile Bottom Nav - 3 primary modules */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200/90 px-4 py-2 z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
-        <div className="grid grid-cols-4 gap-1 max-w-lg mx-auto">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = location.pathname.startsWith(item.path);
-            return (
-              <Link
-                key={item.name}
-                to={item.path}
-                className={cn(
-                  'flex flex-col items-center justify-center py-1 px-1 rounded-2xl transition-all duration-150 touch-manipulation',
-                  isActive 
-                    ? 'text-blue-950 font-black' 
-                    : 'text-slate-400 hover:text-slate-600 font-medium'
-                )}
-              >
-                <div className={cn(
-                  'p-2 rounded-xl transition-all duration-200',
-                  isActive ? 'bg-amber-400 text-blue-950 shadow-sm scale-105' : 'bg-transparent'
-                )}>
-                  <Icon size={20} />
-                </div>
-                <span className={cn(
-                  'text-[11px] mt-1 tracking-tight',
-                  isActive ? 'text-blue-950 font-black' : 'text-slate-500 font-bold'
-                )}>
-                  {item.name}
-                </span>
-              </Link>
-            );
-          })}
-        </div>
+      <nav className="fixed inset-x-0 bottom-0 z-40 grid h-16 grid-cols-5 border-t border-slate-200 bg-white md:hidden">
+        {primary.map(item=>{const I=item.icon;const isActive=active(item.path);return <Link key={item.path} to={item.path} className={cn('flex flex-col items-center justify-center gap-1 text-[10px] font-bold',isActive?'text-blue-950':'text-slate-400')}><I size={20}/><span>{item.name}</span></Link>})}
+        <button onClick={()=>setShowMenu(true)} className="flex flex-col items-center justify-center gap-1 text-[10px] font-bold text-slate-400"><Menu size={20}/><span>Plus</span></button>
       </nav>
+
+      {showMenu && <div className="fixed inset-0 z-[100] flex justify-end bg-slate-950/35" onClick={()=>setShowMenu(false)}><aside onClick={e=>e.stopPropagation()} className="h-full w-[86%] max-w-sm overflow-y-auto bg-white p-5 shadow-2xl"><div className="flex items-center justify-between border-b border-slate-100 pb-4"><div><h2 className="text-lg font-black text-slate-950">Administration</h2><p className="text-xs text-slate-500">Tous les modules Market-Cash</p></div><button onClick={()=>setShowMenu(false)} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100"><X size={20}/></button></div><div className="mt-4 space-y-1">{navItems.map(item=>{const I=item.icon;return <Link key={item.path} to={item.path} onClick={()=>setShowMenu(false)} className={cn('flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-bold',active(item.path)?'bg-blue-950 text-white':'text-slate-700 hover:bg-slate-50')}><I size={18}/><span>{item.name}</span></Link>})}</div></aside></div>}
     </div>
   );
 }
-
