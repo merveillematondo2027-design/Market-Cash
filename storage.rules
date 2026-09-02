@@ -9,19 +9,50 @@ service firebase.storage {
     function isChefAgence(){return isSignedIn() && (isAdminGeneral() || getUserRole() == 'chef_agence');}
     function isDesignerGraphique(){return isSignedIn() && (isAdminGeneral() || getUserRole() == 'designer_graphique');}
     function validImage(){return request.resource.size <= 5 * 1024 * 1024 && request.resource.contentType.matches('image/(jpeg|png|webp|jpg)');}
+    function validKycImage(){return request.resource.size <= 12 * 1024 * 1024 && request.resource.contentType.matches('image/(jpeg|png|webp|jpg)');}
 
-    match /payment-proofs/{userId}/{fileName}{allow read:if isOwner(userId)||isChefAgence();allow create:if isOwner(userId)&&validImage();allow delete:if isOwner(userId)||isChefAgence();}
-    match /identity-proofs/{userId}/{fileName}{allow read:if isOwner(userId)||isChefAgence();allow create:if isOwner(userId)&&validImage();allow delete:if isOwner(userId)||isChefAgence();}
-    match /market-cash/purchase-proofs/{userId}/{fileName}{allow read:if isOwner(userId)||isChefAgence();allow create:if isOwner(userId)&&validImage();allow delete:if isOwner(userId)||isChefAgence();}
+    match /payment-proofs/{userId}/{fileName}{
+      allow read:if isOwner(userId)||isChefAgence();
+      allow create:if isOwner(userId)&&validImage();
+      allow delete:if isOwner(userId)||isChefAgence();
+    }
+    match /identity-proofs/{userId}/{fileName}{
+      allow read:if isOwner(userId)||isChefAgence();
+      allow create:if isOwner(userId)&&validImage();
+      allow delete:if isOwner(userId)||isChefAgence();
+    }
+    match /market-cash/purchase-proofs/{userId}/{fileName}{
+      allow read:if isOwner(userId)||isChefAgence();
+      allow create:if isOwner(userId)&&validImage();
+      allow delete:if isOwner(userId)||isChefAgence();
+    }
 
-    // KYC documents are private: only their owner and authorized verification staff can read them.
-    match /kyc/{userId}/{fileName}{allow read:if isOwner(userId)||isChefAgence();allow create,update:if isOwner(userId)&&validImage();allow delete:if isOwner(userId)||isAdminGeneral();}
+    // Documents KYC privés: propriétaire + personnel de vérification autorisé.
+    // Limite dédiée à 12 Mo, cohérente avec le flux de capture/recadrage mobile.
+    match /kyc/{userId}/{fileName}{
+      allow read:if isOwner(userId)||isChefAgence();
+      allow create,update:if isOwner(userId)&&validKycImage();
+      allow delete:if isOwner(userId)||isAdminGeneral();
+    }
 
-    match /card-designs/{cardId}/{fileName}{allow read:if isSignedIn();allow create,update:if (isAdminGeneral()||isDesignerGraphique())&&request.resource.size<=12*1024*1024&&request.resource.contentType.matches('image/(jpeg|png|webp|jpg)');allow delete:if isAdminGeneral();}
-    match /market-cash/cards/{cardIdentifier}/{fileName}{allow read:if isChefAgence()||isDesignerGraphique();allow create,update:if isChefAgence()&&fileName=='front.png'&&request.resource.size<=12*1024*1024&&request.resource.contentType=='image/png';allow delete:if isAdminGeneral();}
+    match /card-designs/{cardId}/{fileName}{
+      allow read:if isSignedIn();
+      allow create,update:if (isAdminGeneral()||isDesignerGraphique())&&request.resource.size<=12*1024*1024&&request.resource.contentType.matches('image/(jpeg|png|webp|jpg)');
+      allow delete:if isAdminGeneral();
+    }
+    match /market-cash/cards/{cardIdentifier}/{fileName}{
+      allow read:if isChefAgence()||isDesignerGraphique();
+      allow create,update:if isChefAgence()&&fileName=='front.png'&&request.resource.size<=12*1024*1024&&request.resource.contentType=='image/png';
+      allow delete:if isAdminGeneral();
+    }
 
     // Portrait KYC = avatar du profil. Lecture réservée aux utilisateurs authentifiés.
-    match /avatars/{userId}/{fileName}{allow read:if isSignedIn();allow create,update:if isOwner(userId)&&validImage();allow delete:if isOwner(userId)||isAdminGeneral();}
+    match /avatars/{userId}/{fileName}{
+      allow read:if isSignedIn();
+      allow create,update:if isOwner(userId)&&validKycImage();
+      allow delete:if isOwner(userId)||isAdminGeneral();
+    }
+
     match /{allPaths=**}{allow read,write:if false;}
   }
 }
