@@ -33,6 +33,29 @@ jobs:
         working-directory: functions
         run: npm run build
 
+      - name: Reduce Gen2 CPU for quota-limited deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          changed = 0
+          for path in Path('functions/lib').rglob('*.js'):
+              text = path.read_text()
+              updated = text.replace(
+                  '{ region: REGION }',
+                  "{ region: REGION, cpu: 'gcf_gen1' }",
+              )
+              if updated != text:
+                  path.write_text(updated)
+                  changed += 1
+
+          print(f'Patched compiled function files: {changed}')
+          if changed == 0:
+              raise SystemExit('No Firebase Gen2 region options were patched; refusing deployment.')
+          PY
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
@@ -69,5 +92,5 @@ jobs:
               --only "functions:${fn}" \
               --project automarket-fintech \
               --non-interactive
-            sleep 8
+            sleep 12
           done < /tmp/market-cash-functions.txt
