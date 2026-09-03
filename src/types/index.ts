@@ -1,6 +1,7 @@
 export type UserRole = 'admin_general' | 'agent_administratif' | 'chef_agence' | 'designer_graphique' | 'livreur' | 'client' | 'agent' | 'marchand';
 export type KycStatus = 'not_started' | 'pending' | 'approved' | 'rejected';
 export type AccountUpgradeType = 'agent' | 'marchand';
+export type AccountStatus = 'active' | 'suspended' | 'blocked';
 
 export interface User {
   uid: string;
@@ -14,6 +15,11 @@ export interface User {
   pinHash: string;
   useBiometrics?: boolean;
   kycStatus?: KycStatus;
+  accountStatus?: AccountStatus;
+  adminNote?: string;
+  securityResetAt?: number;
+  accountStatusUpdatedAt?: number;
+  accountStatusUpdatedBy?: string;
   createdAt: number;
   updatedAt: number;
 }
