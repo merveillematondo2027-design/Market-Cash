@@ -76,6 +76,12 @@ function Guard({children,allowedRoles}:{children:React.ReactNode;allowedRoles:Us
 
 const AdminGeneralOnly=({children}:{children:React.ReactNode})=><Guard allowedRoles={['admin_general']}>{children}</Guard>;
 
+function AdminHome(){
+  const{user}=useAuthStore();
+  if(user?.role==='agent_administratif')return <Navigate to="/admin/account-requests" replace/>;
+  return <AdminDashboard/>;
+}
+
 export default function App(){
   const{setFirebaseUser,setUser,setLoading}=useAuthStore();
 
@@ -147,7 +153,7 @@ export default function App(){
 
       <Route path="/admin" element={<Guard allowedRoles={['admin_general','agent_administratif']}><AdminLayout/></Guard>}>
         <Route index element={<Navigate to="dashboard" replace/>}/>
-        <Route path="dashboard" element={<AdminDashboard/>}/>
+        <Route path="dashboard" element={<AdminHome/>}/>
         <Route path="users" element={<AdminUsers/>}/>
         <Route path="account-requests" element={<AccountRequests/>}/>
         <Route path="notifications" element={<AdminNotifications/>}/>
