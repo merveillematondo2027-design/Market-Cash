@@ -1,313 +1,53 @@
-import { useState, useEffect } from 'react';
-import { collection, getDocs, query, where, onSnapshot } from 'firebase/firestore';
-import { db } from '../../firebase/config';
-import { useAuthStore } from '../../store/authStore';
-import { Link } from 'react-router-dom';
-import { 
-  Building, 
-  FileText, 
-  CreditCard, 
-  Truck, 
-  Clock, 
-  CheckCircle2, 
-  ArrowRight, 
-  Plus, 
-  AlertCircle,
-  Phone,
-  MapPin,
-  Sparkles
-} from 'lucide-react';
-import { CardPurchaseRequest, PhysicalCardRequest, UserCard } from '../../types';
+import{useEffect,useState}from'react';
+import{collection,onSnapshot}from'firebase/firestore';
+import{db}from'../../firebase/config';
+import{useAuthStore}from'../../store/authStore';
+import{Link}from'react-router-dom';
+import{ArrowRight,Building2,CreditCard,FileText,HandCoins,ShieldCheck,Store,Truck,Users,WalletCards}from'lucide-react';
+import{CardPurchaseRequest,PhysicalCardRequest,UserCard}from'../../types';
 
-export default function AgencyDashboard() {
-  const { user } = useAuthStore();
-  const [stats, setStats] = useState({
-    pendingRequests: 0,
-    soldCards: 0,
-    toPrintCards: 0,
-    activeDeliveries: 0,
-  });
-  const [recentRequests, setRecentRequests] = useState<CardPurchaseRequest[]>([]);
-  const [recentDeliveries, setRecentDeliveries] = useState<PhysicalCardRequest[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function AgencyDashboard(){
+  const{user}=useAuthStore();
+  const[stats,setStats]=useState({users:0,clients:0,pendingKyc:0,pendingRequests:0,availableCards:0,activeDeliveries:0});
+  const[recentRequests,setRecentRequests]=useState<CardPurchaseRequest[]>([]);
+  const[recentDeliveries,setRecentDeliveries]=useState<PhysicalCardRequest[]>([]);
+  const[loading,setLoading]=useState(true);
 
-  useEffect(() => {
-    // 1. Listen to Card Purchase Requests
-    const qRequests = query(collection(db, 'card_purchase_requests'));
-    const unsubRequests = onSnapshot(qRequests, (snap) => {
-      const allReqs = snap.docs.map(d => ({ ...d.data(), id: d.id } as CardPurchaseRequest));
-      const pending = allReqs.filter(r => r.status === 'pending');
-      
-      setStats(prev => ({ ...prev, pendingRequests: pending.length }));
-      setRecentRequests(allReqs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 4));
-      setLoading(false);
-    }, (err) => {
-      console.error('[AGENCY_DASH_REQUESTS_ERR]', err);
-      setLoading(false);
-    });
+  useEffect(()=>{
+    const unsubs=[
+      onSnapshot(collection(db,'users'),snap=>{const all=snap.docs.map(d=>d.data()as any);setStats(prev=>({...prev,users:all.length,clients:all.filter(x=>x.role==='client').length}))},e=>console.warn('[AGENCY_USERS_ERROR]',e)),
+      onSnapshot(collection(db,'kyc_requests'),snap=>setStats(prev=>({...prev,pendingKyc:snap.docs.filter(d=>(d.data()as any).status==='pending').length})),e=>console.warn('[AGENCY_KYC_ERROR]',e)),
+      onSnapshot(collection(db,'card_purchase_requests'),snap=>{const all=snap.docs.map(d=>({id:d.id,...d.data()}as CardPurchaseRequest));setStats(prev=>({...prev,pendingRequests:all.filter(r=>r.status==='pending'||String(r.status)==='in_review').length}));setRecentRequests(all.sort((a,b)=>Number(b.createdAt||0)-Number(a.createdAt||0)).slice(0,4));setLoading(false)},e=>{console.warn('[AGENCY_REQUESTS_ERROR]',e);setLoading(false)}),
+      onSnapshot(collection(db,'cards'),snap=>{const all=snap.docs.map(d=>d.data()as UserCard);setStats(prev=>({...prev,availableCards:all.filter(c=>c.saleStatus==='available').length}))},e=>console.warn('[AGENCY_CARDS_ERROR]',e)),
+      onSnapshot(collection(db,'physical_card_requests'),snap=>{const all=snap.docs.map(d=>({id:d.id,...d.data()}as PhysicalCardRequest));setStats(prev=>({...prev,activeDeliveries:all.filter(d=>['pending','assigned','out_for_delivery','in_progress'].includes(String(d.status))).length}));setRecentDeliveries(all.sort((a,b)=>Number(b.createdAt||0)-Number(a.createdAt||0)).slice(0,4))},e=>console.warn('[AGENCY_DELIVERIES_ERROR]',e)),
+    ];
+    return()=>unsubs.forEach(fn=>fn());
+  },[]);
 
-    // 2. Listen to Cards
-    const qCards = query(collection(db, 'cards'));
-    const unsubCards = onSnapshot(qCards, (snap) => {
-      const allCards = snap.docs.map(d => d.data() as UserCard);
-      const sold = allCards.filter(c => c.saleStatus === 'sold' || (c as any).userId);
-      const toPrint = allCards.filter(c => (c as any).printStatus === 'pending' || (c as any).saleStatus === 'sold');
-      
-      setStats(prev => ({ 
-        ...prev, 
-        soldCards: sold.length,
-        toPrintCards: toPrint.length
-      }));
-    }, (err) => {
-      console.error('[AGENCY_DASH_CARDS_ERR]', err);
-    });
-
-    // 3. Listen to Physical Deliveries
-    const qDeliveries = query(collection(db, 'physical_card_requests'));
-    const unsubDeliveries = onSnapshot(qDeliveries, (snap) => {
-      const allDels = snap.docs.map(d => ({ ...d.data(), id: d.id } as PhysicalCardRequest));
-      const active = allDels.filter(d => d.status === 'pending' || d.status === 'in_progress');
-      
-      setStats(prev => ({ ...prev, activeDeliveries: active.length }));
-      setRecentDeliveries(allDels.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 4));
-    }, (err) => {
-      console.error('[AGENCY_DASH_DELIVERIES_ERR]', err);
-    });
-
-    return () => {
-      unsubRequests();
-      unsubCards();
-      unsubDeliveries();
-    };
-  }, []);
-
-  const statItems = [
-    {
-      label: 'Demandes en attente',
-      value: stats.pendingRequests,
-      icon: Clock,
-      color: 'text-amber-600',
-      bg: 'bg-amber-50 border-amber-200',
-      link: '/agency/requests'
-    },
-    {
-      label: 'Cartes vendues',
-      value: stats.soldCards,
-      icon: CreditCard,
-      color: 'text-blue-600',
-      bg: 'bg-blue-50 border-blue-200',
-      link: '/agency/cards'
-    },
-    {
-      label: 'À imprimer (Atelier)',
-      value: stats.toPrintCards,
-      icon: Sparkles,
-      color: 'text-purple-600',
-      bg: 'bg-purple-50 border-purple-200',
-      link: '/agency/cards'
-    },
-    {
-      label: 'Livraisons actives',
-      value: stats.activeDeliveries,
-      icon: Truck,
-      color: 'text-emerald-600',
-      bg: 'bg-emerald-50 border-emerald-200',
-      link: '/agency/deliveries'
-    },
+  const metrics=[
+    {label:'Clients visibles',value:stats.clients,icon:Users,tone:'bg-blue-50 text-blue-800'},
+    {label:'KYC en attente',value:stats.pendingKyc,icon:ShieldCheck,tone:'bg-amber-50 text-amber-700'},
+    {label:'Demandes cartes',value:stats.pendingRequests,icon:FileText,tone:'bg-violet-50 text-violet-700'},
+    {label:'Cartes disponibles',value:stats.availableCards,icon:CreditCard,tone:'bg-emerald-50 text-emerald-700'},
+    {label:'Livraisons actives',value:stats.activeDeliveries,icon:Truck,tone:'bg-cyan-50 text-cyan-700'},
   ];
 
-  return (
-    <div className="space-y-6">
-      {/* Top Banner */}
-      <div className="bg-gradient-to-br from-blue-950 via-blue-900 to-indigo-950 rounded-3xl p-5 sm:p-6 text-white shadow-xl border border-blue-900/50 relative overflow-hidden">
-        <div className="relative z-10">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="bg-amber-400 text-blue-950 font-black text-xs px-2.5 py-1 rounded-lg uppercase tracking-wider">
-                  Agence Régionale
-                </span>
-                <span className="text-xs text-blue-200 font-medium">
-                  {user?.agencyName || 'Siège Opérationnel'}
-                </span>
-              </div>
-              <h1 className="text-xl sm:text-2xl font-black text-white mt-1.5 tracking-tight">
-                Bonjour, {user?.displayName || 'Chef d\'Agence'}
-              </h1>
-              <p className="text-xs sm:text-sm text-blue-200/90 mt-1 max-w-xl">
-                Gérez les demandes d'achat, confirmez les ventes de cartes PVC, et pilotez les livraisons en temps réel.
-              </p>
-            </div>
-            <div className="flex gap-2 shrink-0">
-              <Link
-                to="/agency/requests"
-                className="bg-amber-400 hover:bg-amber-300 text-blue-950 font-black text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 touch-manipulation"
-              >
-                <Plus size={16} />
-                <span>Traiter Demandes</span>
-              </Link>
-            </div>
-          </div>
-        </div>
-      </div>
+  return <div className="space-y-6 pb-10">
+    <section className="rounded-[2rem] bg-blue-950 p-6 text-white shadow-xl md:p-8"><div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-center"><div><div className="flex flex-wrap items-center gap-2"><span className="rounded-lg bg-amber-400 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-blue-950">Centre d’agence</span><span className="text-xs font-bold text-blue-200">{user?.agencyName||'Réseau Market-Cash'}</span></div><h1 className="mt-3 text-2xl font-black tracking-tight md:text-3xl">Bonjour, {user?.displayName||'Chef d’Agence'}</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-blue-200">L’agence sert le réseau local : accueil client, suivi des demandes, cartes physiques et livraisons. Les mouvements monétaires sensibles restent exécutés par les wallets et Cloud Functions Market-Cash.</p></div><Link to="/agency/requests" className="rounded-xl bg-amber-400 px-4 py-3 text-center text-xs font-black text-blue-950">Voir les opérations en attente</Link></div></section>
 
-      {/* Metric Cards Grid (Mobile-First 2 cols, Desktop 4 cols) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {statItems.map((stat, idx) => {
-          const Icon = stat.icon;
-          return (
-            <Link
-              key={idx}
-              to={stat.link}
-              className={`rounded-2xl p-4 sm:p-5 border ${stat.bg} shadow-sm hover:shadow-md transition-all flex flex-col justify-between`}
-            >
-              <div className="flex items-center justify-between">
-                <div className={`p-2.5 rounded-xl bg-white shadow-xs ${stat.color}`}>
-                  <Icon size={20} />
-                </div>
-                <ArrowRight size={14} className="text-slate-400" />
-              </div>
-              <div className="mt-3">
-                <div className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight">
-                  {stat.value}
-                </div>
-                <div className="text-[11px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider mt-0.5">
-                  {stat.label}
-                </div>
-              </div>
-            </Link>
-          );
-        })}
-      </div>
+    {loading?<div className="rounded-3xl border border-slate-200 bg-white p-7 text-sm text-slate-500">Chargement de l’agence…</div>:<>
+      <section className="grid grid-cols-2 gap-3 md:grid-cols-5">{metrics.map(item=>{const I=item.icon;return <div key={item.label} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><div className={`grid h-10 w-10 place-items-center rounded-xl ${item.tone}`}><I size={19}/></div><div className="mt-4 text-2xl font-black text-slate-950">{item.value}</div><div className="mt-1 text-xs font-black text-slate-700">{item.label}</div></div>})}</section>
 
-      {/* Main Content Grid: Recent Requests & Recent Deliveries */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Purchase Requests */}
-        <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 border border-slate-200/80 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base sm:text-lg font-black text-slate-800 tracking-tight flex items-center gap-2">
-                <FileText size={18} className="text-blue-600" />
-                Dernières Demandes d'Achat
-              </h2>
-              <p className="text-xs text-slate-500">Demandes soumises par les clients</p>
-            </div>
-            <Link 
-              to="/agency/requests"
-              className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1"
-            >
-              Voir tout ({stats.pendingRequests})
-              <ArrowRight size={13} />
-            </Link>
-          </div>
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"><InfoCard icon={WalletCards} title="Wallet client" text="Le portefeuille principal reçoit les dépôts, transferts et paiements. Il ne doit pas être confondu avec une carte."/><InfoCard icon={HandCoins} title="Réseau Agent" text="Les dépôts et retraits cash passent par les Agents agréés et leur float, pas directement par l’agence."/><InfoCard icon={Store} title="Marchands" text="Les comptes Marchand reçoivent les paiements clients après validation administrative de leur statut."/><InfoCard icon={CreditCard} title="Cartes" text="Les cartes sont des moyens de paiement séparés, alimentés depuis le wallet lorsque la politique le permet."/></section>
 
-          {recentRequests.length === 0 ? (
-            <div className="text-center py-8 text-slate-400 text-xs">
-              Aucune demande d'achat enregistrée.
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              {recentRequests.map((req) => (
-                <div 
-                  key={req.id}
-                  className="bg-slate-50 hover:bg-blue-50/50 p-3.5 rounded-xl border border-slate-200/70 transition-all flex items-center justify-between gap-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-xs sm:text-sm text-slate-800 truncate">
-                        {req.userName || req.userEmail || 'Client'}
-                      </span>
-                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-md uppercase ${
-                        req.status === 'pending' ? 'bg-amber-100 text-amber-800' :
-                        req.status === 'approved' ? 'bg-emerald-100 text-emerald-800' :
-                        'bg-red-100 text-red-800'
-                      }`}>
-                        {req.status === 'pending' ? 'En attente' : req.status === 'approved' ? 'Approuvée' : 'Rejetée'}
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-2">
-                      <span>{req.cardName || 'Carte Market-Cash'}</span>
-                      <span>•</span>
-                      <span className="font-black text-slate-700">{req.price || 10} USD</span>
-                    </div>
-                  </div>
+      <section className="grid gap-4 lg:grid-cols-2"><div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><div><h2 className="font-black text-slate-950">Demandes récentes</h2><p className="text-xs text-slate-500">Commandes de cartes à traiter par l’agence.</p></div><Link to="/agency/requests" className="text-xs font-black text-blue-800">Voir tout</Link></div><div className="mt-4 space-y-2">{recentRequests.length===0?<Empty text="Aucune demande récente."/>:recentRequests.map(req=><Link key={req.id} to="/agency/requests" className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 p-4"><div className="min-w-0"><div className="truncate text-sm font-black text-slate-900">{req.userName||req.userEmail||'Client Market-Cash'}</div><div className="mt-1 text-[11px] text-slate-500">{req.cardName||'Carte Market-Cash'} · {req.amount||req.price||0} {req.currency||'USD'}</div></div><span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black ${req.status==='approved'?'bg-emerald-100 text-emerald-800':req.status==='rejected'?'bg-red-100 text-red-700':'bg-amber-100 text-amber-800'}`}>{req.status==='approved'?'Validée':req.status==='rejected'?'Rejetée':'En attente'}</span></Link>)}</div></div>
 
-                  <Link
-                    to="/agency/requests"
-                    className="bg-blue-950 text-white hover:bg-blue-900 px-3 py-1.5 rounded-lg text-xs font-bold shrink-0 transition-colors shadow-xs"
-                  >
-                    Gérer
-                  </Link>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><div><h2 className="font-black text-slate-950">Livraisons récentes</h2><p className="text-xs text-slate-500">Suivi physique des cartes commandées.</p></div><Link to="/agency/deliveries" className="text-xs font-black text-blue-800">Voir tout</Link></div><div className="mt-4 space-y-2">{recentDeliveries.length===0?<Empty text="Aucune livraison récente."/>:recentDeliveries.map(del=><Link key={del.id} to="/agency/deliveries" className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 p-4"><div className="min-w-0"><div className="truncate text-sm font-black text-slate-900">{del.clientName||del.clientEmail||'Destinataire'}</div><div className="mt-1 truncate text-[11px] text-slate-500">{del.deliveryAddress||'Adresse non renseignée'}</div></div><span className="shrink-0 rounded-full bg-blue-100 px-2.5 py-1 text-[10px] font-black text-blue-800">{del.status||'En cours'}</span></Link>)}</div></div></section>
 
-        {/* Recent Deliveries */}
-        <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 border border-slate-200/80 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base sm:text-lg font-black text-slate-800 tracking-tight flex items-center gap-2">
-                <Truck size={18} className="text-emerald-600" />
-                Suivi des Livraisons Physiques
-              </h2>
-              <p className="text-xs text-slate-500">Cartes commandées en livraison</p>
-            </div>
-            <Link 
-              to="/agency/deliveries"
-              className="text-xs font-bold text-emerald-600 hover:text-emerald-800 flex items-center gap-1"
-            >
-              Voir tout
-              <ArrowRight size={13} />
-            </Link>
-          </div>
-
-          {recentDeliveries.length === 0 ? (
-            <div className="text-center py-8 text-slate-400 text-xs">
-              Aucune commande physique en cours.
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              {recentDeliveries.map((del) => (
-                <div 
-                  key={del.id}
-                  className="bg-slate-50 hover:bg-emerald-50/40 p-3.5 rounded-xl border border-slate-200/70 transition-all flex items-center justify-between gap-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-xs sm:text-sm text-slate-800 truncate">
-                        {del.clientName || del.clientEmail || 'Destinataire'}
-                      </span>
-                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-md uppercase ${
-                        del.status === 'delivered' ? 'bg-emerald-100 text-emerald-800' :
-                        del.status === 'reported' ? 'bg-amber-100 text-amber-800' :
-                        del.status === 'cancelled' ? 'bg-red-100 text-red-800' :
-                        'bg-blue-100 text-blue-800'
-                      }`}>
-                        {del.status === 'delivered' ? 'Livrée' : 
-                         del.status === 'reported' ? 'Reportée' :
-                         del.status === 'cancelled' ? 'Annulée' : 'En cours'}
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1 truncate">
-                      <MapPin size={12} className="shrink-0 text-slate-400" />
-                      <span className="truncate">{del.deliveryAddress || 'Adresse non spécifiée'}</span>
-                    </div>
-                  </div>
-
-                  <Link
-                    to="/agency/deliveries"
-                    className="bg-emerald-600 text-white hover:bg-emerald-700 px-3 py-1.5 rounded-lg text-xs font-bold shrink-0 transition-colors shadow-xs"
-                  >
-                    Suivre
-                  </Link>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
+      <section className="rounded-3xl bg-slate-950 p-5 text-white"><div className="flex items-start gap-3"><div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-white/10 text-amber-400"><Building2 size={21}/></div><div><h2 className="font-black">Nouvelle logique Chef d’Agence</h2><p className="mt-2 text-sm leading-6 text-slate-300">L’interface d’agence devient un centre opérationnel local. Elle ne remplace ni l’Administrateur Général ni le terminal Agent : chaque rôle garde ses permissions et son parcours propre.</p><div className="mt-4 flex flex-wrap gap-2"><Link to="/agency/cards" className="inline-flex items-center gap-1 rounded-xl bg-white/10 px-3 py-2 text-xs font-black">Gérer les cartes <ArrowRight size={13}/></Link><Link to="/agency/deliveries" className="inline-flex items-center gap-1 rounded-xl bg-white/10 px-3 py-2 text-xs font-black">Suivre les livraisons <ArrowRight size={13}/></Link></div></div></div></section>
+    </>}
+  </div>;
 }
+
+function InfoCard({icon:Icon,title,text}:{icon:any;title:string;text:string}){return <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div className="grid h-11 w-11 place-items-center rounded-2xl bg-blue-50 text-blue-900"><Icon size={21}/></div><h3 className="mt-4 font-black text-slate-950">{title}</h3><p className="mt-2 text-sm leading-6 text-slate-500">{text}</p></div>}
+function Empty({text}:{text:string}){return <div className="rounded-2xl bg-slate-50 p-6 text-center text-sm text-slate-500">{text}</div>}
