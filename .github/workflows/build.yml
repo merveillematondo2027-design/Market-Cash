@@ -22,3 +22,9 @@ jobs:
         run: npm run lint
       - name: Production build
         run: npm run build
+      - name: Install Cloud Functions dependencies
+        working-directory: functions
+        run: npm install --no-package-lock --no-audit --no-fund
+      - name: Cloud Functions TypeScript
+        working-directory: functions
+        run: npm run build
