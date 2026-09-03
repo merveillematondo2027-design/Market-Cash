@@ -73,6 +73,10 @@ function Guard({children,allowedRoles}:{children:React.ReactNode;allowedRoles:Us
   const{isAuthenticated,user,loading}=useAuthStore();
   if(loading)return <div className="flex min-h-screen items-center justify-center bg-slate-50"><div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-blue-950"/></div>;
   if(!isAuthenticated||!user)return <Navigate to="/login" replace/>;
+  if(user.accountStatus==='suspended'||user.accountStatus==='blocked'){
+    const blocked=user.accountStatus==='blocked';
+    return <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4"><div className="w-full max-w-md rounded-3xl border bg-white p-7 text-center shadow-xl"><div className={`mx-auto grid h-14 w-14 place-items-center rounded-2xl ${blocked?'bg-red-100 text-red-700':'bg-amber-100 text-amber-800'}`}>!</div><h1 className="mt-5 text-2xl font-black text-slate-950">{blocked?'Compte bloqué':'Compte temporairement suspendu'}</h1><p className="mt-3 text-sm leading-6 text-slate-600">{blocked?'L’administration Market-Cash a bloqué ce compte. Les espaces personnels et professionnels sont désactivés.':'L’accès à ce compte est temporairement suspendu par l’administration Market-Cash.'}</p><p className="mt-2 text-xs text-slate-400">Contactez le support si vous pensez qu’une vérification est nécessaire.</p><button onClick={()=>void authService.logout()} className="mt-6 w-full rounded-2xl bg-blue-950 px-5 py-3 font-black text-white">Se déconnecter</button></div></div>;
+  }
   if(!allowedRoles.includes(user.role))return <Navigate to={getHomeRouteByRole(user.role)} replace/>;
   return <>{children}</>;
 }
@@ -102,7 +106,7 @@ export default function App(){
             if(!snapshot.exists())return;
             const live={...resolved,...snapshot.data(),uid:firebaseUser.uid}as User;
             setUser(live);
-            console.log('[AUTH_ROLE_SYNC]',{uid:live.uid,role:live.role,kycStatus:live.kycStatus});
+            console.log('[AUTH_ROLE_SYNC]',{uid:live.uid,role:live.role,kycStatus:live.kycStatus,accountStatus:live.accountStatus||'active'});
           },error=>console.warn('[AUTH_ROLE_SYNC_ERROR]',error));
         }catch(error:any){
           console.error('[USER_PROFILE_ERROR]',error?.message);
