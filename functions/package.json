@@ -1,7 +1,7 @@
 {
   "name": "market-cash-functions",
   "private": true,
-  "main": "lib/index.js",
+  "main": "lib/entry.js",
   "engines": { "node": "20" },
   "scripts": {
     "build": "tsc",

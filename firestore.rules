@@ -6,16 +6,29 @@ service cloud.firestore {
     function userExists(){ return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
     function getUserRole(){ return userExists() ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role : null; }
     function isBootstrapAdminEmail(){ return isSignedIn() && request.auth.token.email == 'merveillematondo2027@gmail.com'; }
-    function isOfficialRole(role){ return role in ['client','agent','marchand','admin_general','chef_agence','designer_graphique','livreur']; }
+    function isOfficialRole(role){ return role in ['client','agent','marchand','agent_administratif','admin_general','chef_agence','designer_graphique','livreur']; }
     function isAdminGeneral(){ return isSignedIn() && (isBootstrapAdminEmail() || getUserRole() == 'admin_general'); }
+    function isAgentAdministratif(){ return isSignedIn() && getUserRole() == 'agent_administratif'; }
+    function isOperationsAdmin(){ return isAdminGeneral() || isAgentAdministratif(); }
     function isChefAgence(){ return isSignedIn() && (isAdminGeneral() || getUserRole() == 'chef_agence'); }
     function isDesignerGraphique(){ return isSignedIn() && (isAdminGeneral() || getUserRole() == 'designer_graphique'); }
     function isLivreur(){ return isSignedIn() && (isAdminGeneral() || getUserRole() == 'livreur'); }
-    function isStaff(){ return isAdminGeneral() || isChefAgence() || isDesignerGraphique() || isLivreur(); }
+    function isStaff(){ return isOperationsAdmin() || isChefAgence() || isDesignerGraphique() || isLivreur(); }
     function ownerUserUpdateIsSafe(){
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
         'displayName','phone','avatar','pinHash','useBiometrics','updatedAt'
       ]);
+    }
+    function operationsUserUpdateIsSafe(){
+      let changed=request.resource.data.diff(resource.data).affectedKeys();
+      return (
+        changed.hasOnly(['kycStatus','updatedAt'])
+        && request.resource.data.kycStatus in ['not_started','pending','approved','rejected']
+      ) || (
+        changed.hasOnly(['role','updatedAt'])
+        && resource.data.role == 'client'
+        && request.resource.data.role in ['client','agent','marchand']
+      );
     }
     function ownerKycUpdateIsSafe(){
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -50,17 +63,15 @@ service cloud.firestore {
         && request.resource.data.uid == userId
         && isOfficialRole(request.resource.data.role)
       );
-      // Compatibilité avec les anciens profils: le propriétaire peut corriger ses champs
-      // personnels sans dépendre de la présence historique de uid/email/role.
-      // Les champs sensibles role/email/uid/kycStatus restent non modifiables par le client.
       allow update: if (isOwner(userId) && ownerUserUpdateIsSafe())
-        || (isAdminGeneral() && request.resource.data.uid == userId && isOfficialRole(request.resource.data.role));
+        || (isAdminGeneral() && request.resource.data.uid == userId && isOfficialRole(request.resource.data.role))
+        || (isAgentAdministratif() && operationsUserUpdateIsSafe());
       allow delete: if isAdminGeneral();
       match /cards/{cardId}{ allow read: if isOwner(userId)||isChefAgence(); allow write: if isChefAgence(); }
     }
 
     match /kyc_requests/{userId} {
-      allow read: if isOwner(userId) || isAdminGeneral() || isChefAgence();
+      allow read: if isOwner(userId) || isOperationsAdmin() || isChefAgence();
       allow create: if isOwner(userId)
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.status == 'pending';
@@ -70,12 +81,12 @@ service cloud.firestore {
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.status == 'pending'
         && ownerKycUpdateIsSafe()
-      ) || isAdminGeneral() || isChefAgence();
+      ) || isOperationsAdmin() || isChefAgence();
       allow delete: if isAdminGeneral();
     }
 
     match /account_upgrade_requests/{userId} {
-      allow read: if isOwner(userId) || isAdminGeneral();
+      allow read: if isOwner(userId) || isOperationsAdmin();
       allow create: if isOwner(userId)
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.requestedType in ['agent','marchand']
@@ -87,15 +98,24 @@ service cloud.firestore {
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.status == 'pending'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'requestedType','legalName','activity','phone','city','address','registrationNumber','reason','status','updatedAt'
+          'requestedType','legalName','tradeName','activity','phone','email','city','address',
+          'businessType','registrationNumber','taxNumber','estimatedMonthlyVolume','pointName',
+          'floatEstimate','openingHours','reason','status','termsAcceptedAt','createdAt','updatedAt'
         ])
-      ) || isAdminGeneral();
+      ) || isOperationsAdmin();
       allow delete: if isAdminGeneral();
     }
 
     match /agent_profiles/{userId} {
-      allow read: if isOwner(userId) || isAdminGeneral();
-      allow create,update,delete: if isAdminGeneral();
+      allow read: if isOwner(userId) || isOperationsAdmin();
+      allow create,update: if isOperationsAdmin();
+      allow delete: if isAdminGeneral();
+    }
+
+    match /merchant_profiles/{userId} {
+      allow read: if isOwner(userId) || isOperationsAdmin();
+      allow create,update: if isOperationsAdmin();
+      allow delete: if isAdminGeneral();
     }
 
     match /app_settings/{settingId}{ allow read: if isSignedIn(); allow write: if isAdminGeneral() || (settingId == 'card_design' && getUserRole() == 'designer_graphique'); }
@@ -135,9 +155,9 @@ service cloud.firestore {
       allow delete: if isAdminGeneral();
     }
     match /notifications/{notificationId} {
-      allow read: if isSignedIn() && (isAdminGeneral() || resource.data.userId == request.auth.uid || resource.data.userId == 'all' || resource.data.userId == getUserRole());
+      allow read: if isSignedIn() && (isOperationsAdmin() || resource.data.userId == request.auth.uid || resource.data.userId == 'all' || resource.data.userId == getUserRole());
       allow create: if isSignedIn() && (isStaff() || request.resource.data.userId == request.auth.uid);
-      allow update: if isSignedIn() && (isAdminGeneral() || resource.data.userId == request.auth.uid || resource.data.userId == 'all' || resource.data.userId == getUserRole()) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow update: if isSignedIn() && (isOperationsAdmin() || resource.data.userId == request.auth.uid || resource.data.userId == 'all' || resource.data.userId == getUserRole()) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
       allow delete: if isSignedIn() && (isAdminGeneral() || resource.data.userId == request.auth.uid);
     }
     match /help_articles/{articleId}{ allow read: if isSignedIn(); allow write: if isAdminGeneral(); }
@@ -147,9 +167,9 @@ service cloud.firestore {
       allow update: if false;
     }
 
-    // Les collections monétaires (wallet_accounts, wallet_transactions, ledger_entries,
-    // card_wallet_accounts, wallet_public_ids...) sont volontairement absentes des droits
-    // client. Elles sont écrites par Cloud Functions via Admin SDK.
+    // Les collections monétaires restent exclusivement gérées par les Cloud Functions
+    // (wallet_accounts, wallet_transactions, ledger_entries, card_wallet_accounts,
+    // wallet_public_ids, autorisations de retrait, etc.).
     match /{document=**}{ allow read,write: if false; }
   }
 }

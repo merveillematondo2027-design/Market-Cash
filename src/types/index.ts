@@ -1,4 +1,4 @@
-export type UserRole = 'admin_general' | 'chef_agence' | 'designer_graphique' | 'livreur' | 'client' | 'agent' | 'marchand';
+export type UserRole = 'admin_general' | 'agent_administratif' | 'chef_agence' | 'designer_graphique' | 'livreur' | 'client' | 'agent' | 'marchand';
 export type KycStatus = 'not_started' | 'pending' | 'approved' | 'rejected';
 export type AccountUpgradeType = 'agent' | 'marchand';
 
@@ -44,11 +44,19 @@ export interface AccountUpgradeRequest {
   userId: string;
   requestedType: AccountUpgradeType;
   legalName: string;
+  tradeName?: string;
   activity: string;
   phone: string;
+  email?: string;
   city: string;
   address: string;
+  businessType?: string;
   registrationNumber?: string;
+  taxNumber?: string;
+  estimatedMonthlyVolume?: string;
+  pointName?: string;
+  floatEstimate?: string;
+  openingHours?: string;
   reason?: string;
   status: 'pending' | 'approved' | 'rejected';
   createdAt: number;

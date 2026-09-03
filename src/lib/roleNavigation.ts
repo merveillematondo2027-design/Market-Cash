@@ -1,8 +1,8 @@
 import { UserRole } from '../types';
 
-export const OFFICIAL_ROLES:UserRole[]=['client','agent','marchand','admin_general','chef_agence','designer_graphique','livreur'];
+export const OFFICIAL_ROLES:UserRole[]=['client','agent','marchand','agent_administratif','admin_general','chef_agence','designer_graphique','livreur'];
 export const CUSTOMER_ROLES:UserRole[]=['client','agent','marchand'];
-export const STAFF_ROLES:UserRole[]=['admin_general','chef_agence','designer_graphique','livreur'];
+export const STAFF_ROLES:UserRole[]=['agent_administratif','admin_general','chef_agence','designer_graphique','livreur'];
 
 export function getHomeRouteByRole(role?:UserRole|string|null):string{
   if(!role)return'/';
@@ -10,6 +10,7 @@ export function getHomeRouteByRole(role?:UserRole|string|null):string{
   let route='/client/home';
   switch(r){
     case'admin_general':route='/admin/dashboard';break;
+    case'agent_administratif':route='/admin/account-requests';break;
     case'chef_agence':route='/agency/dashboard';break;
     case'designer_graphique':route='/designer/cards';break;
     case'livreur':route='/delivery/dashboard';break;
@@ -24,7 +25,7 @@ export function getHomeRouteByRole(role?:UserRole|string|null):string{
 export function getBaseRouteByRole(role?:UserRole|string|null):string{
   if(!role)return'/';
   const r=String(role).toLowerCase().trim();
-  if(r==='admin_general')return'/admin';
+  if(r==='admin_general'||r==='agent_administratif')return'/admin';
   if(r==='chef_agence')return'/agency';
   if(r==='designer_graphique')return'/designer';
   if(r==='livreur')return'/delivery';
@@ -35,7 +36,7 @@ export function getBaseRouteByRole(role?:UserRole|string|null):string{
 
 export function isRouteAllowedForRole(role:UserRole|string,pathname:string):boolean{
   const r=String(role).toLowerCase().trim();
-  if(pathname.startsWith('/admin'))return r==='admin_general';
+  if(pathname.startsWith('/admin'))return['admin_general','agent_administratif'].includes(r);
   if(pathname.startsWith('/agency'))return['chef_agence','admin_general'].includes(r);
   if(pathname.startsWith('/designer'))return['designer_graphique','admin_general'].includes(r);
   if(pathname.startsWith('/delivery'))return['livreur','admin_general'].includes(r);
