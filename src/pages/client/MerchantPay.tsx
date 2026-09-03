@@ -30,9 +30,9 @@ export default function MerchantPay(){
     if(!merchantId.trim()||!valid)return;
     setBusy(true);
     try{
-      const result=await agentWalletService.lookupMarketCashRecipient(merchantId.trim().toUpperCase());
+      const result=await agentWalletService.lookupMerchantRecipient(merchantId.trim().toUpperCase());
       setMerchant(result);setStep('review');
-    }catch(e:any){toast.error(e?.message||'Marchand introuvable. Vérifiez son ID Market-Cash.');}
+    }catch(e:any){toast.error(e?.message||'Marchand introuvable ou non autorisé. Vérifiez son ID Market-Cash.');}
     finally{setBusy(false)}
   };
 
@@ -40,9 +40,9 @@ export default function MerchantPay(){
     if(!merchant||!valid||!pin)return;
     setBusy(true);
     try{
-      const result=await agentWalletService.transferMarketCash({marketCashId:merchant.marketCashId,currency,amount:value,pin,idempotencyKey:key()});
+      const result=await agentWalletService.payMerchant({marketCashId:merchant.marketCashId,currency,amount:value,pin,idempotencyKey:key()});
       setReference(result.reference);setStep('done');setPin('');
-      toast.success('Paiement Market-Cash envoyé.');
+      toast.success('Paiement marchand confirmé.');
       await refresh();
     }catch(e:any){toast.error(e?.message||'Paiement refusé.');}
     finally{setBusy(false)}
@@ -53,7 +53,7 @@ export default function MerchantPay(){
     <section className="mt-5 rounded-3xl border bg-white p-5 shadow-sm md:p-6">
       <div className="grid h-12 w-12 place-items-center rounded-2xl bg-amber-50 text-amber-700"><Store/></div>
       <h1 className="mt-4 text-2xl font-black text-slate-950">Payer un marchand</h1>
-      <p className="mt-1 text-sm text-slate-500">Paiement instantané d'un portefeuille Market-Cash vers le compte du marchand.</p>
+      <p className="mt-1 text-sm text-slate-500">Paiement instantané vers un compte Marchand Market-Cash approuvé.</p>
       <div className="mt-4 rounded-2xl bg-blue-50 p-4 text-sm text-blue-950">Solde {currency} : <b>{fmt(balance,currency)}</b></div>
 
       {step==='form'&&<div className="mt-5 space-y-3">
@@ -66,8 +66,8 @@ export default function MerchantPay(){
       </div>}
 
       {step==='review'&&merchant&&<div className="mt-5 space-y-3">
-        <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-black uppercase text-slate-400">Bénéficiaire</p><p className="mt-1 text-lg font-black">{merchant.displayName}</p><p className="font-mono text-sm text-slate-500">{merchant.marketCashId}</p><div className="mt-4 flex justify-between border-t pt-3"><span>À payer</span><b>{fmt(value,currency)}</b></div></div>
-        <div className="rounded-2xl bg-amber-50 p-3 text-xs text-amber-900">Vérifiez le nom affiché avec le marchand avant de confirmer.</div>
+        <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-black uppercase text-slate-400">Marchand vérifié</p><p className="mt-1 text-lg font-black">{merchant.displayName}</p>{merchant.legalName&&merchant.legalName!==merchant.displayName&&<p className="text-xs text-slate-500">{merchant.legalName}</p>}<p className="mt-1 font-mono text-sm text-slate-500">{merchant.marketCashId}</p><div className="mt-4 flex justify-between border-t pt-3"><span>À payer</span><b>{fmt(value,currency)}</b></div></div>
+        <div className="rounded-2xl bg-amber-50 p-3 text-xs text-amber-900">Vérifiez le nom affiché avec le marchand avant de confirmer. Le serveur refuse les comptes qui ne sont pas des marchands actifs.</div>
         <button onClick={()=>setStep('pin')} className="w-full rounded-2xl bg-blue-950 py-4 font-black text-white">Continuer</button>
         <button onClick={()=>setStep('form')} className="w-full py-2 text-sm font-bold text-slate-500">Modifier</button>
       </div>}
