@@ -1,776 +1,85 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { collection, getDocs, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
-import { db } from '../../firebase/config';
-import { cardService, CardPricingSettings } from '../../services/cardService';
-import {  
-  Users, 
-  CreditCard, 
-  FileText, 
-  CheckCircle2, 
-  XCircle, 
-  Clock, 
-  Truck, 
-  Bell, 
-  HelpCircle, 
-  Settings, 
-  AlertTriangle, 
-  ArrowRight, 
-  PlusCircle, 
-  DollarSign, 
-  Smartphone, 
-  ShieldCheck,
-  RefreshCw,
-  ExternalLink,
-  ChevronRight,
-  TrendingUp,
-  Library, Activity } from 'lucide-react';
-import { CardPurchaseRequest, PhysicalCardRequest } from '../../types';
+import{useEffect,useState}from'react';
+import{useNavigate}from'react-router-dom';
+import{collection,getDocs}from'firebase/firestore';
+import{db}from'../../firebase/config';
+import{cardService}from'../../services/cardService';
+import{Activity,ArrowRight,Bell,Boxes,CreditCard,FileClock,HandCoins,RefreshCw,ShieldCheck,Store,Truck,Users,WalletCards}from'lucide-react';
 
-export default function AdminDashboard() {
-  const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+interface AdminStats{totalUsers:number;clients:number;agents:number;merchants:number;pendingKyc:number;pendingUpgrades:number;pendingCardRequests:number;availableCards:number;activeDeliveries:number;activePaymentMethods:number;}
 
-  // KPIs
-  const [stats, setStats] = useState({
-    totalUsers: 0,
-    newUsersThisWeek: 0,
-    totalCards: 0,
-    availableCards: 0,
-    assignedCards: 0,
-    totalRequests: 0,
-    pendingRequests: 0,
-    approvedRequests: 0,
-    rejectedRequests: 0,
-    pendingDeliveries: 0,
-    activeDeliveries: 0,
-    completedDeliveries: 0,
-    paymentMethodsCount: 0,
-    activePaymentMethodsCount: 0,
-  });
+export default function AdminDashboard(){
+  const navigate=useNavigate();
+  const[loading,setLoading]=useState(true);
+  const[refreshing,setRefreshing]=useState(false);
+  const[stats,setStats]=useState<AdminStats>({totalUsers:0,clients:0,agents:0,merchants:0,pendingKyc:0,pendingUpgrades:0,pendingCardRequests:0,availableCards:0,activeDeliveries:0,activePaymentMethods:0});
+  const[reviewQueue,setReviewQueue]=useState<any[]>([]);
 
-  const [pricing, setPricing] = useState<CardPricingSettings>({
-    cardPrice: null,
-    printingPrice: null,
-    urgencyFee: null,
-    virtualCardPrice: null,
-    physicalCardPrice: null, urgentPhysicalCardPrice: null,
-    currency: 'USD'
-  });
-
-  const [recentRequests, setRecentRequests] = useState<CardPurchaseRequest[]>([]);
-  const [recentDeliveries, setRecentDeliveries] = useState<PhysicalCardRequest[]>([]);
-
-  const loadAllData = async () => {
-    try {
-      setRefreshing(true);
-
-      // 1. Users
-      const usersSnap = await getDocs(collection(db, 'users'));
-      const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-      let newUsers = 0;
-      usersSnap.forEach(doc => {
-        const u = doc.data();
-        if (u.createdAt && (typeof u.createdAt === 'number' ? u.createdAt : new Date(u.createdAt).getTime()) > oneWeekAgo) {
-          newUsers++;
-        }
-      });
-
-      // 2. Cards in inventory
-      const cardsSnap = await getDocs(collection(db, 'cards'));
-      let available = 0;
-      let assigned = 0;
-      cardsSnap.forEach(doc => {
-        const c = doc.data();
-        if (c.saleStatus === 'available') available++;
-        else assigned++;
-      });
-
-      // 3. Purchase requests
-      const requestsSnap = await getDocs(collection(db, 'card_purchase_requests'));
-      let pendingReq = 0;
-      let approvedReq = 0;
-      let rejectedReq = 0;
-      const reqList: CardPurchaseRequest[] = [];
-
-      requestsSnap.forEach(doc => {
-        const r = { id: doc.id, ...doc.data() } as CardPurchaseRequest;
-        reqList.push(r);
-        if (r.status === 'pending' || (r as any).status === 'in_review') pendingReq++;
-        else if (r.status === 'approved') approvedReq++;
-        else if (r.status === 'rejected') rejectedReq++;
-      });
-
-      // Sort recent requests
-      reqList.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      setRecentRequests(reqList.slice(0, 5));
-
-      // 4. Deliveries
-      const deliveriesSnap = await getDocs(collection(db, 'physical_card_requests'));
-      let pendingDel = 0;
-      let activeDel = 0;
-      let compDel = 0;
-      const delList: PhysicalCardRequest[] = [];
-
-      deliveriesSnap.forEach(doc => {
-        const d = { id: doc.id, ...doc.data() } as PhysicalCardRequest;
-        delList.push(d);
-        if (d.status === 'pending') pendingDel++;
-        else if (d.status === 'assigned' || d.status === 'out_for_delivery') activeDel++;
-        else if (d.status === 'delivered') compDel++;
-      });
-
-      delList.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      setRecentDeliveries(delList.slice(0, 4));
-
-      // 5. Payment methods
-      const pMethods = await cardService.getPaymentMethods();
-      const activePMethods = pMethods.filter(m => m.active);
-
-      // 6. Pricing
-      const pPricing = await cardService.getPricing(true);
-      setPricing(pPricing);
-
+  const load=async()=>{
+    setRefreshing(true);
+    try{
+      const[usersSnap,kycSnap,upgradeSnap,requestSnap,cardsSnap,deliverySnap,paymentMethods]=await Promise.all([
+        getDocs(collection(db,'users')),
+        getDocs(collection(db,'kyc_requests')),
+        getDocs(collection(db,'account_upgrade_requests')),
+        getDocs(collection(db,'card_purchase_requests')),
+        getDocs(collection(db,'cards')),
+        getDocs(collection(db,'physical_card_requests')),
+        cardService.getPaymentMethods(),
+      ]);
+      const users=usersSnap.docs.map(d=>d.data()as any);
+      const pendingKyc=kycSnap.docs.map(d=>({id:d.id,type:'kyc',...d.data()}as any)).filter(x=>x.status==='pending');
+      const pendingUpgrades=upgradeSnap.docs.map(d=>({id:d.id,type:'upgrade',...d.data()}as any)).filter(x=>x.status==='pending');
+      const pendingCardRequests=requestSnap.docs.filter(d=>['pending','in_review'].includes(String((d.data()as any).status))).length;
+      const availableCards=cardsSnap.docs.filter(d=>String((d.data()as any).saleStatus)==='available').length;
+      const activeDeliveries=deliverySnap.docs.filter(d=>['pending','assigned','out_for_delivery','in_progress'].includes(String((d.data()as any).status))).length;
       setStats({
-        totalUsers: usersSnap.size,
-        newUsersThisWeek: newUsers,
-        totalCards: cardsSnap.size,
-        availableCards: available,
-        assignedCards: assigned,
-        totalRequests: requestsSnap.size,
-        pendingRequests: pendingReq,
-        approvedRequests: approvedReq,
-        rejectedRequests: rejectedReq,
-        pendingDeliveries: pendingDel,
-        activeDeliveries: activeDel,
-        completedDeliveries: compDel,
-        paymentMethodsCount: pMethods.length,
-        activePaymentMethodsCount: activePMethods.length,
+        totalUsers:users.length,
+        clients:users.filter(u=>u.role==='client').length,
+        agents:users.filter(u=>u.role==='agent').length,
+        merchants:users.filter(u=>u.role==='marchand').length,
+        pendingKyc:pendingKyc.length,
+        pendingUpgrades:pendingUpgrades.length,
+        pendingCardRequests,
+        availableCards,
+        activeDeliveries,
+        activePaymentMethods:paymentMethods.filter(m=>m.active).length,
       });
-
-    } catch (error) {
-      console.error('[DASHBOARD_LOAD_ERROR]', error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+      setReviewQueue([...pendingKyc,...pendingUpgrades].sort((a,b)=>Number(b.createdAt||0)-Number(a.createdAt||0)).slice(0,6));
+    }catch(error){console.error('[ADMIN_CONTROL_CENTER_ERROR]',error)}
+    finally{setLoading(false);setRefreshing(false)}
   };
 
-  useEffect(() => {
-    loadAllData();
-    // Also subscribe to pricing
-    const unsubPricing = cardService.subscribePricing((p) => setPricing(p));
-    return () => unsubPricing();
-  }, []);
+  useEffect(()=>{void load()},[]);
 
-  const hasUrgentActions = stats.pendingRequests > 0 || stats.pendingDeliveries > 0;
-  const isVirtualPriceConfigured = pricing.cardPrice !== null && pricing.cardPrice > 0;
-  const isPhysicalPriceConfigured = pricing.printingPrice !== null && pricing.printingPrice > 0;
+  const mainStats=[
+    {label:'Utilisateurs',value:stats.totalUsers,sub:`${stats.clients} clients`,icon:Users,to:'/admin/users',tone:'bg-blue-50 text-blue-800'},
+    {label:'KYC en attente',value:stats.pendingKyc,sub:'Identités à vérifier',icon:ShieldCheck,to:'/admin/account-requests',tone:'bg-amber-50 text-amber-700'},
+    {label:'Comptes pro',value:stats.pendingUpgrades,sub:'Agent / Marchand',icon:Store,to:'/admin/account-requests',tone:'bg-violet-50 text-violet-700'},
+    {label:'Agents actifs',value:stats.agents,sub:'Points de vente',icon:HandCoins,to:'/admin/agents',tone:'bg-emerald-50 text-emerald-700'},
+    {label:'Marchands',value:stats.merchants,sub:'Comptes Business',icon:Store,to:'/admin/account-requests',tone:'bg-cyan-50 text-cyan-700'},
+    {label:'Cartes disponibles',value:stats.availableCards,sub:'Stock attribuable',icon:CreditCard,to:'/admin/stock',tone:'bg-slate-100 text-slate-700'},
+  ];
 
-  return (
-    <div className="space-y-6 max-w-7xl mx-auto">
-      {/* Header & Quick Action Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 p-6 md:p-8 rounded-[2rem] text-white shadow-xl">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 bg-amber-400 text-blue-950 text-xs font-black rounded-lg uppercase tracking-wider">
-              Centre de Contrôle
-            </span>
-            <span className="text-xs text-blue-200 font-medium">Market-Cash Admin</span>
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
-            Accueil Administrateur
-          </h1>
-          <p className="text-sm text-blue-200 max-w-xl">
-            Supervisez les flux, validez les paiements, gérez les cartes et coordonnez les livraisons en temps réel.
-          </p>
-        </div>
+  const operationCards=[
+    {title:'Clients & Wallets',text:'Superviser les comptes, rôles et profils de portefeuille.',icon:WalletCards,to:'/admin/users',badge:`${stats.clients} clients`},
+    {title:'KYC & Comptes professionnels',text:'Approuver les identités puis activer Agent ou Marchand.',icon:ShieldCheck,to:'/admin/account-requests',badge:`${stats.pendingKyc+stats.pendingUpgrades} à traiter`},
+    {title:'Réseau Agents & Float',text:'Gérer les Agents point de vente et leur float opérationnel.',icon:HandCoins,to:'/admin/agents',badge:`${stats.agents} agents`},
+    {title:'Demandes de cartes',text:'Traiter les commandes de cartes sans mélanger le wallet principal.',icon:FileClock,to:'/admin/requests',badge:`${stats.pendingCardRequests} en attente`},
+    {title:'Stock & production',text:'Contrôler les cartes préconfigurées et la bibliothèque PVC.',icon:Boxes,to:'/admin/stock',badge:`${stats.availableCards} disponibles`},
+    {title:'Livraisons physiques',text:'Suivre les cartes physiques qui doivent être livrées.',icon:Truck,to:'/admin/deliveries',badge:`${stats.activeDeliveries} actives`},
+  ];
 
-        <div className="flex items-center gap-2.5 shrink-0">
-          <button
-            onClick={loadAllData}
-            disabled={refreshing}
-            className="flex items-center gap-2 px-4 py-2.5 bg-blue-900/80 hover:bg-blue-800 text-blue-100 rounded-xl text-xs font-bold transition border border-blue-700/50 cursor-pointer disabled:opacity-50"
-            title="Rafraîchir les données"
-          >
-            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
-            <span>Actualiser</span>
-          </button>
-          <button
-            onClick={() => navigate('/admin/requests')}
-            className="flex items-center gap-2 px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-blue-950 rounded-xl text-xs font-black transition shadow-md shadow-amber-400/20 cursor-pointer"
-          >
-            <PlusCircle size={16} />
-            <span>Traiter les Demandes ({stats.pendingRequests})</span>
-          </button>
-        </div>
-      </div>
+  return <div className="space-y-6 pb-10">
+    <section className="overflow-hidden rounded-[2rem] bg-blue-950 p-6 text-white shadow-xl md:p-8"><div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-center"><div><div className="flex flex-wrap items-center gap-2"><span className="rounded-lg bg-amber-400 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-blue-950">Control Center</span><span className="text-xs font-bold text-blue-200">Architecture wallet-first</span></div><h1 className="mt-3 text-2xl font-black tracking-tight md:text-3xl">Administration Market-Cash</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-blue-200">Le portefeuille principal est le cœur du système. L’administration supervise ensuite le KYC, les comptes professionnels, les Agents, les Marchands, les cartes et les livraisons sans mélanger leurs responsabilités.</p></div><div className="flex gap-2"><button onClick={load} disabled={refreshing} className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/10 px-4 py-3 text-xs font-black text-white disabled:opacity-50"><RefreshCw size={15} className={refreshing?'animate-spin':''}/>Actualiser</button><button onClick={()=>navigate('/admin/account-requests')} className="rounded-xl bg-amber-400 px-4 py-3 text-xs font-black text-blue-950">Traiter les validations</button></div></div></section>
 
-      {/* URGENT INTERVENTIONS BANNER */}
-      {hasUrgentActions && (
-        <div className="bg-amber-500/10 border-2 border-amber-400/40 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm animate-in fade-in">
-          <div className="flex items-start gap-3">
-            <div className="p-2 bg-amber-500 text-white rounded-xl shadow-sm shrink-0 mt-0.5">
-              <AlertTriangle size={20} />
-            </div>
-            <div>
-              <h3 className="text-sm font-black text-amber-950">Interventions prioritaires requises</h3>
-              <div className="text-xs text-amber-900 font-medium flex flex-wrap gap-x-4 gap-y-1 mt-0.5">
-                {stats.pendingRequests > 0 && (
-                  <span>⚠️ <strong>{stats.pendingRequests}</strong> paiement(s) en attente de vérification</span>
-                )}
-                {stats.pendingDeliveries > 0 && (
-                  <span>📦 <strong>{stats.pendingDeliveries}</strong> carte(s) physique(s) à assigner aux livreurs</span>
-                )}
-              </div>
-            </div>
-          </div>
-          <div className="flex gap-2 w-full sm:w-auto">
-            {stats.pendingRequests > 0 && (
-              <button
-                onClick={() => navigate('/admin/requests')}
-                className="flex-1 sm:flex-none px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black transition cursor-pointer shadow-sm"
-              >
-                Vérifier paiements →
-              </button>
-            )}
-            {stats.pendingDeliveries > 0 && (
-              <button
-                onClick={() => navigate('/admin/deliveries')}
-                className="flex-1 sm:flex-none px-3.5 py-2 bg-blue-900 hover:bg-blue-950 text-white rounded-xl text-xs font-black transition cursor-pointer shadow-sm"
-              >
-                Gérer livraisons →
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+    {loading?<div className="rounded-3xl border border-slate-200 bg-white p-8 text-sm text-slate-500">Chargement du centre de contrôle…</div>:<>
+      <section className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">{mainStats.map(item=>{const I=item.icon;return <button key={item.label} onClick={()=>navigate(item.to)} className="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"><div className={`grid h-10 w-10 place-items-center rounded-xl ${item.tone}`}><I size={19}/></div><div className="mt-4 text-2xl font-black text-slate-950">{item.value}</div><div className="mt-1 text-xs font-black text-slate-800">{item.label}</div><div className="mt-1 text-[10px] text-slate-400">{item.sub}</div></button>})}</section>
 
-      {/* SYSTEM PRICING & PAYMENT NUMBERS STATUS STRIP */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {/* Base card price status */}
-        <div 
-          onClick={() => navigate('/admin/profile')} 
-          className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between cursor-pointer hover:border-blue-500 transition group"
-        >
-          <div className="flex items-center gap-3">
-            <div className={`p-2.5 rounded-xl ${isVirtualPriceConfigured ? 'bg-blue-50 text-blue-600' : 'bg-red-50 text-red-600'}`}>
-              <Smartphone size={20} />
-            </div>
-            <div>
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Prix de la carte</span>
-              <span className="text-sm font-black text-slate-800">
-                {isVirtualPriceConfigured ? `${pricing.cardPrice} ${pricing.currency}` : 'Non configuré'}
-              </span>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${isVirtualPriceConfigured ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
-              {isVirtualPriceConfigured ? 'Configuré' : 'À définir'}
-            </span>
-            <ChevronRight size={16} className="text-slate-300 group-hover:text-blue-600 transition" />
-          </div>
-        </div>
+      {(stats.pendingKyc+stats.pendingUpgrades)>0&&<section className="rounded-3xl border border-amber-200 bg-amber-50 p-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="font-black text-amber-950">Validations prioritaires</h2><p className="mt-1 text-sm text-amber-800">{stats.pendingKyc} KYC et {stats.pendingUpgrades} demande(s) de compte professionnel attendent une décision administrative.</p></div><button onClick={()=>navigate('/admin/account-requests')} className="rounded-xl bg-amber-500 px-4 py-2.5 text-xs font-black text-white">Ouvrir la file de validation</button></div></section>}
 
-        {/* Printing price status */}
-        <div 
-          onClick={() => navigate('/admin/profile')} 
-          className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between cursor-pointer hover:border-blue-500 transition group"
-        >
-          <div className="flex items-center gap-3">
-            <div className={`p-2.5 rounded-xl ${isPhysicalPriceConfigured ? 'bg-blue-50 text-blue-600' : 'bg-red-50 text-red-600'}`}>
-              <CreditCard size={20} />
-            </div>
-            <div>
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Prix de l'impression</span>
-              <span className="text-sm font-black text-slate-800">
-                {isPhysicalPriceConfigured ? `${pricing.printingPrice} ${pricing.currency}` : 'Non configuré'}
-              </span>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${isPhysicalPriceConfigured ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
-              {isPhysicalPriceConfigured ? 'Configuré' : 'À définir'}
-            </span>
-            <ChevronRight size={16} className="text-slate-300 group-hover:text-blue-600 transition" />
-          </div>
-        </div>
+      <section><div className="mb-3 flex items-end justify-between"><div><h2 className="text-xl font-black text-slate-950">Opérations Market-Cash</h2><p className="text-xs text-slate-500">Accès direct aux modules réellement utilisés par la nouvelle architecture.</p></div><div className="hidden items-center gap-2 text-xs font-bold text-slate-400 sm:flex"><Activity size={14}/>{stats.activePaymentMethods} moyen(x) de paiement externe actif(s)</div></div><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{operationCards.map(item=>{const I=item.icon;return <button key={item.title} onClick={()=>navigate(item.to)} className="group rounded-3xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-blue-200 hover:shadow-md"><div className="flex items-start justify-between gap-4"><div className="grid h-11 w-11 place-items-center rounded-2xl bg-blue-50 text-blue-900"><I size={21}/></div><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-black text-slate-600">{item.badge}</span></div><h3 className="mt-4 font-black text-slate-950">{item.title}</h3><p className="mt-2 text-sm leading-6 text-slate-500">{item.text}</p><div className="mt-4 inline-flex items-center gap-1 text-xs font-black text-blue-800">Ouvrir <ArrowRight size={14}/></div></button>})}</div></section>
 
-        {/* Payment Methods Status */}
-        <div 
-          onClick={() => navigate('/admin/profile')} 
-          className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between cursor-pointer hover:border-blue-500 transition group sm:col-span-2 lg:col-span-1"
-        >
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-amber-50 text-amber-600">
-              <DollarSign size={20} />
-            </div>
-            <div>
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Numéros de Paiement</span>
-              <span className="text-sm font-black text-slate-800">
-                {stats.activePaymentMethodsCount} actif(s) sur {stats.paymentMethodsCount}
-              </span>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-100 text-blue-800">
-              Gérer
-            </span>
-            <ChevronRight size={16} className="text-slate-300 group-hover:text-amber-600 transition" />
-          </div>
-        </div>
-      </div>
-
-      {/* CORE STATS GRID (All Clickable) */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
-        {/* Total Users */}
-        <div 
-          onClick={() => navigate('/admin/users')}
-          className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-md hover:border-blue-500 transition cursor-pointer flex flex-col justify-between"
-        >
-          <div className="flex justify-between items-start">
-            <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
-              <Users size={18} />
-            </div>
-            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">
-              +{stats.newUsersThisWeek} sem.
-            </span>
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl font-black text-slate-800">{stats.totalUsers}</div>
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Utilisateurs</div>
-          </div>
-        </div>
-
-        {/* Pending Requests */}
-        <div 
-          onClick={() => navigate('/admin/requests')}
-          className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-md hover:border-amber-500 transition cursor-pointer flex flex-col justify-between"
-        >
-          <div className="flex justify-between items-start">
-            <div className="p-2 bg-amber-50 text-amber-600 rounded-xl">
-              <Clock size={18} />
-            </div>
-            {stats.pendingRequests > 0 && (
-              <span className="text-[10px] font-black text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full animate-pulse">
-                Urgents
-              </span>
-            )}
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl font-black text-amber-600">{stats.pendingRequests}</div>
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Paiements en attente</div>
-          </div>
-        </div>
-
-        {/* Approved Requests */}
-        <div 
-          onClick={() => navigate('/admin/requests')}
-          className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-md hover:border-emerald-500 transition cursor-pointer flex flex-col justify-between"
-        >
-          <div className="flex justify-between items-start">
-            <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
-              <CheckCircle2 size={18} />
-            </div>
-            <span className="text-[10px] font-bold text-slate-400">Total: {stats.totalRequests}</span>
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl font-black text-emerald-600">{stats.approvedRequests}</div>
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Paiements validés</div>
-          </div>
-        </div>
-
-        {/* Cards in Catalog */}
-        <div 
-          onClick={() => navigate('/admin/stock')}
-          className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-md hover:border-purple-500 transition cursor-pointer flex flex-col justify-between"
-        >
-          <div className="flex justify-between items-start">
-            <div className="p-2 bg-purple-50 text-purple-600 rounded-xl">
-              <CreditCard size={18} />
-            </div>
-            <span className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded">
-              {stats.availableCards} dispo
-            </span>
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl font-black text-slate-800">{stats.totalCards}</div>
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Cartes stock</div>
-          </div>
-        </div>
-
-        {/* Pending Deliveries */}
-        
-          <div 
-            onClick={() => navigate('/admin/library')}
-            className="bg-white p-5 rounded-[1.8rem] border border-slate-200/90 shadow-sm hover:shadow-md hover:border-purple-500 transition cursor-pointer flex flex-col justify-between group"
-          >
-            <div>
-              <div className="flex justify-between items-start mb-3">
-                <div className="w-12 h-12 rounded-2xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
-                  <Library size={24} />
-                </div>
-              </div>
-              <h3 className="font-black text-base text-slate-800 group-hover:text-purple-600 transition">Bibliothèque</h3>
-              <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
-                Archives des cartes attribuées et visuels prêts à imprimer.
-              </p>
-            </div>
-            <div className="flex items-center gap-1 text-xs font-bold text-purple-600 mt-4 pt-3 border-t border-slate-100">
-              <span>Ouvrir la bibliothèque</span>
-              <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
-            </div>
-          </div>
-
-
-<div onClick={() => navigate('/admin/deliveries')}
-          className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-md hover:border-blue-500 transition cursor-pointer flex flex-col justify-between"
-        >
-          <div className="flex justify-between items-start">
-            <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
-              <Truck size={18} />
-            </div>
-            <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
-              {stats.activeDeliveries} en cours
-            </span>
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl font-black text-slate-800">{stats.pendingDeliveries}</div>
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Livraisons à traiter</div>
-          </div>
-        </div>
-
-        {/* Delivered Cards */}
-        <div 
-          onClick={() => navigate('/admin/deliveries')}
-          className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-md hover:border-emerald-500 transition cursor-pointer flex flex-col justify-between"
-        >
-          <div className="flex justify-between items-start">
-            <div className="p-2 bg-teal-50 text-teal-600 rounded-xl">
-              <ShieldCheck size={18} />
-            </div>
-            <span className="text-[10px] font-bold text-teal-700 bg-teal-50 px-1.5 py-0.5 rounded">
-              Terminées
-            </span>
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl font-black text-slate-800">{stats.completedDeliveries}</div>
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Cartes livrées</div>
-          </div>
-        </div>
-      </div>
-
-      {/* 8 SUB-MODULES CONTROL CENTER (Organized Grid) */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-black text-slate-800 tracking-tight">Modules d'Administration Market-Cash</h2>
-          <span className="text-xs text-slate-400 font-medium">Accès direct et gestion centralisée</span>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* 1. Gestion des Cartes */}
-          <div 
-            onClick={() => navigate('/admin/stock')}
-            className="bg-white p-5 rounded-[1.8rem] border border-slate-200/90 shadow-sm hover:shadow-md hover:border-blue-500 transition cursor-pointer flex flex-col justify-between group"
-          >
-            <div>
-              <div className="flex justify-between items-start mb-3">
-                <div className="w-12 h-12 rounded-2xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
-                  <CreditCard size={24} />
-                </div>
-                <span className="text-xs font-extrabold px-2.5 py-1 bg-blue-50 text-blue-700 rounded-xl border border-blue-100">
-                  {stats.totalCards} cartes
-                </span>
-              </div>
-              <h3 className="font-black text-base text-slate-800 group-hover:text-blue-600 transition">Gestion des Cartes</h3>
-              <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">Gérez le stock de cartes vierges disponibles pour attribution automatique.</p>
-            </div>
-            <div className="flex items-center gap-1 text-xs font-bold text-blue-600 mt-4 pt-3 border-t border-slate-100">
-              <span>Gérer le stock</span>
-              <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
-            </div>
-          </div>
-
-          {/* 2. Utilisateurs */}
-          <div 
-            onClick={() => navigate('/admin/users')}
-            className="bg-white p-5 rounded-[1.8rem] border border-slate-200/90 shadow-sm hover:shadow-md hover:border-indigo-500 transition cursor-pointer flex flex-col justify-between group"
-          >
-            <div>
-              <div className="flex justify-between items-start mb-3">
-                <div className="w-12 h-12 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
-                  <Users size={24} />
-                </div>
-                <span className="text-xs font-extrabold px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-xl border border-indigo-100">
-                  {stats.totalUsers} comptes
-                </span>
-              </div>
-              <h3 className="font-black text-base text-slate-800 group-hover:text-indigo-600 transition">Comptes Utilisateurs</h3>
-              <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
-                Liste complète des clients, livreurs, chefs d'agence et designers.
-              </p>
-            </div>
-            <div className="flex items-center gap-1 text-xs font-bold text-indigo-600 mt-4 pt-3 border-t border-slate-100">
-              <span>Voir les utilisateurs</span>
-              <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
-            </div>
-          </div>
-
-          {/* 3. Paiements & Demandes */}
-          <div 
-            onClick={() => navigate('/admin/requests')}
-            className="bg-white p-5 rounded-[1.8rem] border border-slate-200/90 shadow-sm hover:shadow-md hover:border-amber-500 transition cursor-pointer flex flex-col justify-between group"
-          >
-            <div>
-              <div className="flex justify-between items-start mb-3">
-                <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold">
-                  <FileText size={24} />
-                </div>
-                <span className="text-xs font-extrabold px-2.5 py-1 bg-amber-50 text-amber-700 rounded-xl border border-amber-200">
-                  {stats.pendingRequests} en attente
-                </span>
-              </div>
-              <h3 className="font-black text-base text-slate-800 group-hover:text-amber-600 transition">Paiements & Demandes</h3>
-              <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
-                Vérification des captures de paiement et attribution de cartes.
-              </p>
-            </div>
-            <div className="flex items-center gap-1 text-xs font-bold text-amber-600 mt-4 pt-3 border-t border-slate-100">
-              <span>Vérifier et valider</span>
-              <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
-            </div>
-          </div>
-
-          {/* 4. Livraisons */}
-          <div 
-            onClick={() => navigate('/admin/deliveries')}
-            className="bg-white p-5 rounded-[1.8rem] border border-slate-200/90 shadow-sm hover:shadow-md hover:border-blue-500 transition cursor-pointer flex flex-col justify-between group"
-          >
-            <div>
-              <div className="flex justify-between items-start mb-3">
-                <div className="w-12 h-12 rounded-2xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
-                  <Truck size={24} />
-                </div>
-                <span className="text-xs font-extrabold px-2.5 py-1 bg-blue-50 text-blue-700 rounded-xl border border-blue-100">
-                  {stats.pendingDeliveries} à livrer
-                </span>
-              </div>
-              <h3 className="font-black text-base text-slate-800 group-hover:text-blue-600 transition">Livraisons Physiques</h3>
-              <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
-                Assignation des livreurs, géolocalisation GPS et suivi des remises.
-              </p>
-            </div>
-            <div className="flex items-center gap-1 text-xs font-bold text-blue-600 mt-4 pt-3 border-t border-slate-100">
-              <span>Gérer les livraisons</span>
-              <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
-            </div>
-          </div>
-
-          {/* 5. Centre d'Aide & FAQ */}
-          <div 
-            onClick={() => navigate('/admin/help')}
-            className="bg-white p-5 rounded-[1.8rem] border border-slate-200/90 shadow-sm hover:shadow-md hover:border-teal-500 transition cursor-pointer flex flex-col justify-between group"
-          >
-            <div>
-              <div className="flex justify-between items-start mb-3">
-                <div className="w-12 h-12 rounded-2xl bg-teal-100 text-teal-700 flex items-center justify-center font-bold">
-                  <HelpCircle size={24} />
-                </div>
-                <span className="text-xs font-extrabold px-2.5 py-1 bg-teal-50 text-teal-700 rounded-xl border border-teal-100">
-                  FAQ & Vidéos
-                </span>
-              </div>
-              <h3 className="font-black text-base text-slate-800 group-hover:text-teal-600 transition">Centre d'Aide & FAQ</h3>
-              <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
-                Gestion des questions d'assistance et liens tutoriels (YouTube, TikTok...).
-              </p>
-            </div>
-            <div className="flex items-center gap-1 text-xs font-bold text-teal-600 mt-4 pt-3 border-t border-slate-100">
-              <span>Modifier la FAQ</span>
-              <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
-            </div>
-          </div>
-
-          {/* 6. Notifications & Alertes */}
-          <div 
-            onClick={() => navigate('/admin/notifications')}
-            className="bg-white p-5 rounded-[1.8rem] border border-slate-200/90 shadow-sm hover:shadow-md hover:border-purple-500 transition cursor-pointer flex flex-col justify-between group"
-          >
-            <div>
-              <div className="flex justify-between items-start mb-3">
-                <div className="w-12 h-12 rounded-2xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
-                  <Bell size={24} />
-                </div>
-                <span className="text-xs font-extrabold px-2.5 py-1 bg-purple-50 text-purple-700 rounded-xl border border-purple-100">
-                  Diffusion
-                </span>
-              </div>
-              <h3 className="font-black text-base text-slate-800 group-hover:text-purple-600 transition">Notifications & Alertes</h3>
-              <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
-                Envoi de messages personnalisés ou généraux aux utilisateurs.
-              </p>
-            </div>
-            <div className="flex items-center gap-1 text-xs font-bold text-purple-600 mt-4 pt-3 border-t border-slate-100">
-              <span>Diffuser alertes</span>
-              <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
-            </div>
-          </div>
-
-          {/* 7. Paramètres & Tarifs */}
-          <div 
-            onClick={() => navigate('/admin/profile')}
-            className="bg-white p-5 rounded-[1.8rem] border border-slate-200/90 shadow-sm hover:shadow-md hover:border-slate-800 transition cursor-pointer flex flex-col justify-between group"
-          >
-            <div>
-              <div className="flex justify-between items-start mb-3">
-                <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold">
-                  <Settings size={24} />
-                </div>
-                <span className="text-xs font-extrabold px-2.5 py-1 bg-slate-100 text-slate-700 rounded-xl">
-                  Tarifs & Paiement
-                </span>
-              </div>
-              <h3 className="font-black text-base text-slate-800 group-hover:text-blue-600 transition">Paramètres Application</h3>
-              <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
-                Prix des cartes, numéros M-Pesa/Airtel/Orange et design de carte.
-              </p>
-            </div>
-            <div className="flex items-center gap-1 text-xs font-bold text-slate-800 mt-4 pt-3 border-t border-slate-100">
-              <span>Configurer l'app</span>
-              <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
-            </div>
-          </div>
-
-          {/* 8. Centre de logs */}
-          <div 
-            onClick={() => navigate('/admin/logs')}
-            className="bg-white p-5 rounded-[1.8rem] border border-slate-200/90 shadow-sm hover:shadow-md hover:border-amber-500 transition cursor-pointer flex flex-col justify-between group"
-          >
-            <div>
-              <div className="flex justify-between items-start mb-3">
-                <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold">
-                  <Activity size={24} />
-                </div>
-                <span className="text-xs font-extrabold px-2.5 py-1 bg-amber-50 text-amber-700 rounded-xl border border-amber-200">
-                  Diagnostic
-                </span>
-              </div>
-              <h3 className="font-black text-base text-slate-800 group-hover:text-amber-600 transition">Centre de logs</h3>
-              <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
-                Erreurs, opérations Firebase, paiements, cartes et événements de sécurité.
-              </p>
-            </div>
-            <div className="flex items-center gap-1 text-xs font-bold text-amber-600 mt-4 pt-3 border-t border-slate-100">
-              <span>Gérer le fond PVC</span>
-              <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* RECENT ACTIVITY & TRANSACTIONS SECTION */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Purchase Requests */}
-        <div className="bg-white rounded-[2rem] p-6 border border-slate-200/90 shadow-sm flex flex-col">
-          <div className="flex justify-between items-center mb-4">
-            <div>
-              <h3 className="font-black text-base text-slate-800">Dernières Demandes d'Achat</h3>
-              <p className="text-xs text-slate-400">Preuves de paiement récemment soumises</p>
-            </div>
-            <button 
-              onClick={() => navigate('/admin/requests')}
-              className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
-            >
-              <span>Voir tout</span>
-              <ChevronRight size={14} />
-            </button>
-          </div>
-
-          {recentRequests.length === 0 ? (
-            <div className="text-center py-8 text-slate-400 text-xs font-medium">
-              Aucune demande d'achat enregistrée pour le moment.
-            </div>
-          ) : (
-            <div className="space-y-3 flex-1">
-              {recentRequests.map((req) => (
-                <div 
-                  key={req.id}
-                  onClick={() => navigate('/admin/requests')}
-                  className="p-3.5 bg-slate-50 hover:bg-blue-50/50 rounded-2xl border border-slate-100 transition cursor-pointer flex items-center justify-between gap-3"
-                >
-                  <div className="flex items-center gap-3 overflow-hidden">
-                    <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs shrink-0">
-                      {req.cardType === 'virtual' ? 'V' : 'P'}
-                    </div>
-                    <div className="truncate">
-                      <div className="font-bold text-xs text-slate-800 truncate">{req.userName || req.fullName || 'Client'}</div>
-                      <div className="text-[11px] text-slate-400">{req.paymentMethod || 'Mobile Money'} • {req.amount} {req.currency || 'USD'}</div>
-                    </div>
-                  </div>
-                  <span className={`text-[10px] font-black px-2.5 py-1 rounded-xl shrink-0 ${
-                    req.status === 'pending' ? 'bg-amber-100 text-amber-800' :
-                    req.status === 'approved' ? 'bg-emerald-100 text-emerald-800' :
-                    'bg-red-100 text-red-800'
-                  }`}>
-                    {req.status === 'pending' ? 'En attente' : req.status === 'approved' ? 'Validé' : 'Rejeté'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Recent Deliveries */}
-        <div className="bg-white rounded-[2rem] p-6 border border-slate-200/90 shadow-sm flex flex-col">
-          <div className="flex justify-between items-center mb-4">
-            <div>
-              <h3 className="font-black text-base text-slate-800">Dernières Demandes de Livraison</h3>
-              <p className="text-xs text-slate-400">Cartes physiques commandées par les clients</p>
-            </div>
-            <button 
-              onClick={() => navigate('/admin/deliveries')}
-              className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
-            >
-              <span>Voir tout</span>
-              <ChevronRight size={14} />
-            </button>
-          </div>
-
-          {recentDeliveries.length === 0 ? (
-            <div className="text-center py-8 text-slate-400 text-xs font-medium">
-              Aucune livraison en attente pour le moment.
-            </div>
-          ) : (
-            <div className="space-y-3 flex-1">
-              {recentDeliveries.map((del) => (
-                <div 
-                  key={del.id}
-                  onClick={() => navigate('/admin/deliveries')}
-                  className="p-3.5 bg-slate-50 hover:bg-blue-50/50 rounded-2xl border border-slate-100 transition cursor-pointer flex items-center justify-between gap-3"
-                >
-                  <div className="flex items-center gap-3 overflow-hidden">
-                    <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
-                      <Truck size={18} />
-                    </div>
-                    <div className="truncate">
-                      <div className="font-bold text-xs text-slate-800 truncate">{del.userName || del.cardHolder || 'Client'}</div>
-                      <div className="text-[11px] text-slate-400 truncate">{del.deliveryAddress || 'Adresse en RDC'}</div>
-                    </div>
-                  </div>
-                  <span className={`text-[10px] font-black px-2.5 py-1 rounded-xl shrink-0 ${
-                    del.status === 'pending' ? 'bg-amber-100 text-amber-800' :
-                    del.status === 'delivered' ? 'bg-emerald-100 text-emerald-800' :
-                    'bg-blue-100 text-blue-800'
-                  }`}>
-                    {del.status === 'pending' ? 'À assigner' : del.status === 'delivered' ? 'Livré' : 'En cours'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
+      <section className="grid gap-4 lg:grid-cols-[1.15fr_.85fr]"><div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><div><h2 className="font-black text-slate-950">File de validation récente</h2><p className="text-xs text-slate-500">KYC et demandes Agent / Marchand.</p></div><button onClick={()=>navigate('/admin/account-requests')} className="text-xs font-black text-blue-800">Voir tout</button></div><div className="mt-4 space-y-2">{reviewQueue.length===0?<div className="rounded-2xl bg-slate-50 p-5 text-center text-sm text-slate-500">Aucune validation en attente.</div>:reviewQueue.map(item=><button key={`${item.type}:${item.id}`} onClick={()=>navigate('/admin/account-requests')} className="flex w-full items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4 text-left"><div className="min-w-0"><div className="truncate text-sm font-black text-slate-900">{item.fullName||item.tradeName||item.pointName||item.legalName||'Demande Market-Cash'}</div><div className="mt-1 text-[11px] text-slate-500">{item.type==='kyc'?'Vérification KYC':item.requestedType==='marchand'?'Compte Marchand':'Compte Agent'}</div></div><span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-black text-amber-800">En attente</span></button>)}</div></div><div className="rounded-3xl bg-slate-950 p-5 text-white shadow-sm"><Bell className="text-amber-400"/><h2 className="mt-4 font-black">Principe de contrôle</h2><p className="mt-2 text-sm leading-6 text-slate-300">Un changement de type de compte doit toujours passer par l’administration. Après approbation, le rôle Firestore change et l’utilisateur est automatiquement dirigé vers son interface Agent ou Marchand à la prochaine synchronisation.</p><button onClick={()=>navigate('/admin/logs')} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2.5 text-xs font-black">Consulter les journaux <ArrowRight size={14}/></button></div></section>
+    </>}
+  </div>;
 }
