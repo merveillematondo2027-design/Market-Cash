@@ -26,9 +26,8 @@ export default function AdminLayout() {
   ];
 
   const operationsItems = [
-    { name: 'Accueil', path: '/admin/dashboard', icon: LayoutDashboard },
-    { name: 'Clients', path: '/admin/users', icon: Users },
     { name: 'KYC & Comptes', path: '/admin/account-requests', icon: ShieldCheck },
+    { name: 'Clients', path: '/admin/users', icon: Users },
     { name: 'Notifications', path: '/admin/notifications', icon: Bell },
     { name: 'Profil', path: '/admin/profile', icon: User },
   ];
