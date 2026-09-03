@@ -38,6 +38,15 @@ export interface WithdrawalAuthorization {
   amount: number;
   expiresAt: number;
 }
+export interface WithdrawalInspection {
+  authorizationId: string;
+  clientId: string;
+  clientName: string;
+  clientPhone: string;
+  amount: number;
+  currency: WalletCurrency;
+  expiresAt: number;
+}
 
 export interface InternalCardSummary {
   cardId: string;
@@ -82,6 +91,7 @@ export const agentWalletService = {
 
   createWithdrawalAuthorization: async(input:{currency:WalletCurrency;amount:number;pin:string}) => (await call<typeof input,WithdrawalAuthorization>('createWithdrawalAuthorization')(input)).data,
   cancelWithdrawalAuthorization: async(authorizationId:string) => (await call<{authorizationId:string},{ok:boolean}>('cancelWithdrawalAuthorization')({authorizationId})).data,
+  inspectWithdrawalAuthorization: async(code:string) => (await call<{code:string},WithdrawalInspection>('inspectWithdrawalAuthorization')({code})).data,
   redeemWithdrawalAuthorization: async(input:{code:string;pin:string;idempotencyKey:string}) => (await call<typeof input,{ok:boolean;reference:string;transactionId:string;amount:number;currency:WalletCurrency}>('redeemWithdrawalAuthorization')(input)).data,
 
   getMyInternalCards: async() => (await call<Record<string,never>,{cards:InternalCardSummary[]}>('getMyInternalCards')({})).data.cards,
