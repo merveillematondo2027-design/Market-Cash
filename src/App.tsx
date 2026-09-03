@@ -20,6 +20,7 @@ import AgencyLayout from'./components/layout/AgencyLayout';
 import DesignerLayout from'./components/layout/DesignerLayout';
 import DeliveryLayout from'./components/layout/DeliveryLayout';
 import AgentLayout from'./components/layout/AgentLayout';
+import BusinessLayout from'./components/layout/BusinessLayout';
 import Login from'./pages/auth/Login';
 import Register from'./pages/auth/Register';
 import PinScreen from'./pages/auth/PinScreen';
@@ -35,6 +36,8 @@ import ClientProfile from'./pages/client/Profile';
 import ClientKyc from'./pages/client/Kyc';
 import ComingSoonService from'./pages/client/ComingSoonService';
 import BusinessHome from'./pages/business/BusinessHome';
+import BusinessCollect from'./pages/business/BusinessCollect';
+import BusinessHistory from'./pages/business/BusinessHistory';
 import AdminDashboard from'./pages/admin/Dashboard';
 import AdminUsers from'./pages/admin/Users';
 import AdminAgents from'./pages/admin/AdminAgents';
@@ -141,8 +144,13 @@ export default function App(){
         <Route path="profile" element={<ClientProfile/>}/>
       </Route>
 
-      <Route path="/business/home" element={<Guard allowedRoles={['marchand']}><BusinessHome/></Guard>}/>
-      <Route path="/business/profile" element={<Guard allowedRoles={['marchand']}><ClientProfile/></Guard>}/>
+      <Route path="/business" element={<Guard allowedRoles={['marchand']}><BusinessLayout/></Guard>}>
+        <Route index element={<Navigate to="home" replace/>}/>
+        <Route path="home" element={<BusinessHome/>}/>
+        <Route path="collect" element={<BusinessCollect/>}/>
+        <Route path="history" element={<BusinessHistory/>}/>
+        <Route path="profile" element={<ClientProfile/>}/>
+      </Route>
 
       <Route path="/agent" element={<Guard allowedRoles={['agent']}><AgentGate><AgentLayout/></AgentGate></Guard>}>
         <Route index element={<Navigate to="terminal" replace/>}/>
