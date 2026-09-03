@@ -10,7 +10,7 @@ export function getHomeRouteByRole(role?:UserRole|string|null):string{
   let route='/client/home';
   switch(r){
     case'admin_general':route='/admin/dashboard';break;
-    case'agent_administratif':route='/admin/dashboard';break;
+    case'agent_administratif':route='/admin/account-requests';break;
     case'chef_agence':route='/agency/dashboard';break;
     case'designer_graphique':route='/designer/cards';break;
     case'livreur':route='/delivery/dashboard';break;
