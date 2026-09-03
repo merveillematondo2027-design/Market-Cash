@@ -1,0 +1,46 @@
+name: Market-Cash Functions Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'functions/**'
+      - 'firebase.json'
+      - '.github/workflows/functions-deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy-functions:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Functions dependencies
+        working-directory: functions
+        run: npm install --no-audit --no-fund
+
+      - name: Build Functions
+        working-directory: functions
+        run: npm run build
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/153173040202/locations/global/workloadIdentityPools/github-actions/providers/market-cash'
+          service_account: 'market-cash-github-deployer@automarket-fintech.iam.gserviceaccount.com'
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Deploy Cloud Functions
+        run: firebase deploy --only functions --project automarket-fintech --non-interactive
