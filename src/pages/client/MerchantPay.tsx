@@ -11,9 +11,11 @@ const fmt=(v:number,c:WalletCurrency)=>c==='CDF'?`${v.toLocaleString('fr-FR',{ma
 export default function MerchantPay(){
   const[params]=useSearchParams();
   const currency=(params.get('currency')==='CDF'?'CDF':'USD')as WalletCurrency;
+  const initialMerchant=(params.get('merchant')||params.get('id')||'').trim().toUpperCase();
+  const initialAmount=(params.get('amount')||'').trim();
   const[wallet,setWallet]=useState<WalletServerSnapshot|null>(null);
-  const[merchantId,setMerchantId]=useState('');
-  const[amount,setAmount]=useState('');
+  const[merchantId,setMerchantId]=useState(initialMerchant);
+  const[amount,setAmount]=useState(initialAmount);
   const[merchant,setMerchant]=useState<MarketCashRecipient|null>(null);
   const[pin,setPin]=useState('');
   const[step,setStep]=useState<'form'|'review'|'pin'|'done'>('form');
@@ -54,6 +56,7 @@ export default function MerchantPay(){
       <div className="grid h-12 w-12 place-items-center rounded-2xl bg-amber-50 text-amber-700"><Store/></div>
       <h1 className="mt-4 text-2xl font-black text-slate-950">Payer un marchand</h1>
       <p className="mt-1 text-sm text-slate-500">Paiement instantané vers un compte Marchand Market-Cash approuvé.</p>
+      {initialMerchant&&<div className="mt-3 rounded-2xl bg-emerald-50 p-3 text-xs font-bold text-emerald-800">QR / lien marchand détecté. Vérifiez le montant puis le nom du bénéficiaire avant confirmation.</div>}
       <div className="mt-4 rounded-2xl bg-blue-50 p-4 text-sm text-blue-950">Solde {currency} : <b>{fmt(balance,currency)}</b></div>
 
       {step==='form'&&<div className="mt-5 space-y-3">
