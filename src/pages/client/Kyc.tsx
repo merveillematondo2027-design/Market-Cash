@@ -5,14 +5,14 @@ import {
   ArrowLeft,
   Camera,
   Check,
-  Crop as CropIcon,
   FileImage,
   Images,
+  RotateCcw,
   ShieldCheck,
   UserRound,
   X,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { auth, db, storage } from '../../firebase/config';
 import { useAuthStore } from '../../store/authStore';
@@ -22,6 +22,8 @@ const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 type PhotoType = 'document' | 'portrait';
 type CropDraft = { file: File; url: string; type: PhotoType };
+type CropRect = { x: number; y: number; width: number; height: number };
+type CropHandle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 type KycForm = {
   fullName: string;
   phone: string;
@@ -86,6 +88,7 @@ async function optimizeImage(file: File, maxSide = 1800, quality = 0.86): Promis
 }
 
 export default function ClientKyc() {
+  const navigate = useNavigate();
   const { user, setUser } = useAuthStore();
   const [status, setStatus] = useState('not_started');
   const [busy, setBusy] = useState(false);
@@ -235,7 +238,7 @@ export default function ClientKyc() {
 
       setStatus('pending');
 
-      // La mise à jour de l'avatar ne doit jamais annuler un KYC déjà enregistré.
+      // La synchronisation de l'avatar reste secondaire : un échec ici ne doit pas annuler le KYC.
       if (selfieUrl && selfieUrl !== user.avatar) {
         stage = 'avatar-sync';
         try {
@@ -268,7 +271,8 @@ export default function ClientKyc() {
         }
       }
 
-      toast.success('Dossier KYC envoyé pour vérification.');
+      toast.success('Dossier KYC envoyé. Vérification en cours.');
+      navigate('/client/profile', { replace: true });
     } catch (error) {
       console.error('[KYC_SUBMIT_ERROR]', {
         stage,
@@ -293,6 +297,8 @@ export default function ClientKyc() {
   };
 
   if (!user) return null;
+
+  const canEdit = status === 'not_started' || status === 'rejected';
 
   return (
     <div className="mx-auto max-w-xl p-4 pb-28 md:p-8">
@@ -321,10 +327,27 @@ export default function ClientKyc() {
                 : 'bg-amber-50 text-amber-700'
           }`}
         >
-          Statut : {status === 'approved' ? 'Vérifié' : status === 'rejected' ? 'À corriger' : 'En attente / non complété'}
+          Statut : {status === 'approved' ? 'Vérifié' : status === 'rejected' ? 'À corriger' : status === 'pending' ? 'En cours de vérification' : 'Non complété'}
         </div>
 
-        {status !== 'approved' && (
+        {status === 'pending' && (
+          <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
+            <b>Dossier déjà envoyé.</b>
+            <p className="mt-1 leading-5">La page de saisie est fermée pendant la vérification. Vous recevrez le résultat dans votre compte.</p>
+            <Link to="/client/profile" className="mt-4 inline-flex rounded-xl bg-blue-950 px-4 py-3 font-black text-white">
+              Retour à mon profil
+            </Link>
+          </div>
+        )}
+
+        {status === 'approved' && (
+          <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-900">
+            <b>Identité vérifiée.</b>
+            <p className="mt-1">Votre dossier KYC est clôturé.</p>
+          </div>
+        )}
+
+        {canEdit && (
           <form onSubmit={submit} className="mt-5 space-y-3">
             <input
               required
@@ -383,7 +406,7 @@ export default function ClientKyc() {
 
             <UploadBox
               title="Pièce d'identité"
-              text="Photographiez ou importez une image claire et lisible."
+              text="Photographiez ou importez une image claire et lisible. Vous pourrez ensuite ajuster uniquement le cadre de rognage."
               icon={<FileImage size={22} />}
               preview={documentPreview}
               type="document"
@@ -512,7 +535,7 @@ function UploadBox({
             <div className="mx-auto mb-5 h-1.5 w-12 rounded-full bg-slate-200" />
             <h3 className="text-lg font-black">Choisir la source</h3>
             <p className="mt-1 text-sm text-slate-500">
-              Vous pourrez rogner la photo avant de la confirmer.
+              Après sélection, ajustez le cadre de rognage sans déplacer ni zoomer l'image.
             </p>
             <div className="mt-5 grid grid-cols-2 gap-3">
               <button
@@ -555,62 +578,98 @@ function CropModal({
   onCancel: () => void;
   onConfirm: (file: File, url: string, type: PhotoType) => void;
 }) {
-  const imgRef = useRef<HTMLImageElement>(null);
-  const frameRef = useRef<HTMLDivElement>(null);
-  const [zoom, setZoom] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
+  const imageBoxRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{
+    handle: CropHandle;
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+    rect: CropRect;
+  } | null>(null);
+  const [crop, setCrop] = useState<CropRect>({ x: 0.05, y: 0.08, width: 0.9, height: 0.84 });
   const [working, setWorking] = useState(false);
-  const aspect = draft.type === 'portrait' ? 1 : 1.586;
 
-  const start = (event: React.PointerEvent) => {
-    drag.current = {
-      x: event.clientX,
-      y: event.clientY,
-      ox: offset.x,
-      oy: offset.y,
+  const resetCrop = () => {
+    setCrop(draft.type === 'document'
+      ? { x: 0.05, y: 0.08, width: 0.9, height: 0.84 }
+      : { x: 0.08, y: 0.05, width: 0.84, height: 0.9 });
+  };
+
+  useEffect(() => {
+    resetCrop();
+  }, [draft.url, draft.type]);
+
+  const startResize = (handle: CropHandle, event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragRef.current = {
+      handle,
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      rect: { ...crop },
     };
-    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    event.currentTarget.setPointerCapture(event.pointerId);
   };
 
-  const move = (event: React.PointerEvent) => {
-    if (!drag.current) return;
-    setOffset({
-      x: drag.current.ox + event.clientX - drag.current.x,
-      y: drag.current.oy + event.clientY - drag.current.y,
-    });
+  const resize = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    const box = imageBoxRef.current;
+    if (!drag || !box || drag.pointerId !== event.pointerId) return;
+
+    event.preventDefault();
+    const bounds = box.getBoundingClientRect();
+    if (!bounds.width || !bounds.height) return;
+
+    const dx = (event.clientX - drag.clientX) / bounds.width;
+    const dy = (event.clientY - drag.clientY) / bounds.height;
+    const minWidth = Math.min(0.16, 90 / bounds.width);
+    const minHeight = Math.min(0.16, 70 / bounds.height);
+    const start = drag.rect;
+    let x = start.x;
+    let y = start.y;
+    let width = start.width;
+    let height = start.height;
+
+    if (drag.handle.includes('w')) {
+      const nextX = Math.max(0, Math.min(start.x + start.width - minWidth, start.x + dx));
+      x = nextX;
+      width = start.width + (start.x - nextX);
+    }
+    if (drag.handle.includes('e')) {
+      width = Math.max(minWidth, Math.min(1 - start.x, start.width + dx));
+    }
+    if (drag.handle.includes('n')) {
+      const nextY = Math.max(0, Math.min(start.y + start.height - minHeight, start.y + dy));
+      y = nextY;
+      height = start.height + (start.y - nextY);
+    }
+    if (drag.handle.includes('s')) {
+      height = Math.max(minHeight, Math.min(1 - start.y, start.height + dy));
+    }
+
+    setCrop({ x, y, width, height });
   };
 
-  const finish = () => {
-    drag.current = null;
+  const finishResize = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
   };
 
   const confirm = async () => {
-    const image = imgRef.current;
-    const frame = frameRef.current;
-    if (!image || !frame || !image.naturalWidth || !image.naturalHeight) return;
+    const image = imageRef.current;
+    if (!image || !image.naturalWidth || !image.naturalHeight) return;
 
     setWorking(true);
     try {
-      const frameWidth = frame.clientWidth;
-      const frameHeight = frame.clientHeight;
-      const baseScale = Math.max(
-        frameWidth / image.naturalWidth,
-        frameHeight / image.naturalHeight,
-      );
-      const scale = baseScale * zoom;
-      const drawnWidth = image.naturalWidth * scale;
-      const drawnHeight = image.naturalHeight * scale;
-      const drawnX = (frameWidth - drawnWidth) / 2 + offset.x;
-      const drawnY = (frameHeight - drawnHeight) / 2 + offset.y;
+      const sourceX = Math.round(image.naturalWidth * crop.x);
+      const sourceY = Math.round(image.naturalHeight * crop.y);
+      const sourceWidth = Math.max(1, Math.round(image.naturalWidth * crop.width));
+      const sourceHeight = Math.max(1, Math.round(image.naturalHeight * crop.height));
+      const scale = Math.min(1, 1600 / Math.max(sourceWidth, sourceHeight));
+      const outputWidth = Math.max(1, Math.round(sourceWidth * scale));
+      const outputHeight = Math.max(1, Math.round(sourceHeight * scale));
 
-      const sourceX = Math.max(0, -drawnX / scale);
-      const sourceY = Math.max(0, -drawnY / scale);
-      const sourceWidth = Math.min(frameWidth / scale, image.naturalWidth - sourceX);
-      const sourceHeight = Math.min(frameHeight / scale, image.naturalHeight - sourceY);
-
-      const outputWidth = draft.type === 'portrait' ? 1000 : 1400;
-      const outputHeight = Math.round(outputWidth / aspect);
       const canvas = document.createElement('canvas');
       canvas.width = outputWidth;
       canvas.height = outputHeight;
@@ -633,12 +692,13 @@ function CropModal({
         canvas.toBlob(
           value => (value ? resolve(value) : reject(new Error('BLOB'))),
           'image/jpeg',
-          0.86,
+          0.9,
         );
       });
 
       const file = new File([blob], `${draft.type}-${Date.now()}.jpg`, {
         type: 'image/jpeg',
+        lastModified: Date.now(),
       });
       const url = URL.createObjectURL(file);
       URL.revokeObjectURL(draft.url);
@@ -652,74 +712,133 @@ function CropModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end bg-black/70">
-      <div className="w-full rounded-t-3xl bg-white p-4 pb-7">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-black">Recadrer la photo</h3>
-            <p className="text-xs text-slate-500">Glissez l'image puis utilisez le zoom.</p>
-          </div>
-          <button type="button" onClick={onCancel} className="rounded-full bg-slate-100 p-2">
-            <X />
-          </button>
+    <div className="fixed inset-0 z-[70] flex flex-col bg-slate-950 text-white">
+      <header className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="grid h-10 w-10 place-items-center rounded-full bg-white/10"
+          aria-label="Annuler le rognage"
+        >
+          <X size={21} />
+        </button>
+        <div className="min-w-0 flex-1 text-center">
+          <h3 className="truncate font-black">Rogner {draft.type === 'document' ? "la pièce d'identité" : 'le portrait'}</h3>
+          <p className="text-[11px] text-slate-300">L'image reste fixe · ajustez uniquement le cadre</p>
         </div>
+        <button
+          type="button"
+          onClick={resetCrop}
+          className="grid h-10 w-10 place-items-center rounded-full bg-white/10"
+          aria-label="Réinitialiser le cadre"
+        >
+          <RotateCcw size={19} />
+        </button>
+      </header>
 
+      <main className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-3">
         <div
-          ref={frameRef}
-          onPointerDown={start}
-          onPointerMove={move}
-          onPointerUp={finish}
-          onPointerCancel={finish}
-          className="relative mx-auto mt-4 w-full max-w-md touch-none overflow-hidden rounded-2xl bg-black"
-          style={{ aspectRatio: String(aspect) }}
+          ref={imageBoxRef}
+          className="relative inline-block max-h-full max-w-full overflow-hidden bg-black touch-none"
         >
           <img
-            ref={imgRef}
+            ref={imageRef}
             src={draft.url}
-            alt="Recadrage"
+            alt="Image à rogner"
             draggable={false}
-            className="absolute inset-0 h-full w-full select-none object-cover"
+            className="block max-h-[68vh] max-w-[96vw] select-none object-contain"
+          />
+
+          <div
+            className="absolute border-2 border-white shadow-[0_0_0_9999px_rgba(2,6,23,0.70)]"
             style={{
-              transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`,
-              transformOrigin: 'center',
+              left: `${crop.x * 100}%`,
+              top: `${crop.y * 100}%`,
+              width: `${crop.width * 100}%`,
+              height: `${crop.height * 100}%`,
             }}
-          />
-          <div className="pointer-events-none absolute inset-3 rounded-xl border-2 border-white/80" />
-        </div>
-
-        <div className="mt-4 flex items-center gap-3">
-          <CropIcon size={20} />
-          <input
-            className="w-full"
-            type="range"
-            min="1"
-            max="2.5"
-            step="0.05"
-            value={zoom}
-            onChange={event => setZoom(Number(event.target.value))}
-          />
-          <span className="w-12 text-right text-sm font-bold">{Math.round(zoom * 100)}%</span>
-        </div>
-
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-2xl bg-slate-100 py-3 font-bold text-slate-700"
           >
-            Annuler
-          </button>
+            <div className="pointer-events-none absolute left-1/3 top-0 h-full w-px bg-white/35" />
+            <div className="pointer-events-none absolute left-2/3 top-0 h-full w-px bg-white/35" />
+            <div className="pointer-events-none absolute left-0 top-1/3 h-px w-full bg-white/35" />
+            <div className="pointer-events-none absolute left-0 top-2/3 h-px w-full bg-white/35" />
+
+            <CropHandleButton handle="nw" onStart={startResize} onMove={resize} onEnd={finishResize} />
+            <CropHandleButton handle="n" onStart={startResize} onMove={resize} onEnd={finishResize} />
+            <CropHandleButton handle="ne" onStart={startResize} onMove={resize} onEnd={finishResize} />
+            <CropHandleButton handle="e" onStart={startResize} onMove={resize} onEnd={finishResize} />
+            <CropHandleButton handle="se" onStart={startResize} onMove={resize} onEnd={finishResize} />
+            <CropHandleButton handle="s" onStart={startResize} onMove={resize} onEnd={finishResize} />
+            <CropHandleButton handle="sw" onStart={startResize} onMove={resize} onEnd={finishResize} />
+            <CropHandleButton handle="w" onStart={startResize} onMove={resize} onEnd={finishResize} />
+          </div>
+        </div>
+      </main>
+
+      <footer className="border-t border-white/10 bg-slate-950 px-4 pb-[max(16px,env(safe-area-inset-bottom))] pt-3">
+        <div className="mx-auto max-w-md">
+          <p className="mb-3 text-center text-xs leading-5 text-slate-300">
+            Touchez une <b className="text-white">ligne blanche</b> ou un <b className="text-white">coin</b> du cadre, puis glissez pour choisir exactement la partie à conserver. L'image elle-même ne bouge pas et ne zoome pas.
+          </p>
           <button
             type="button"
             disabled={working}
             onClick={confirm}
-            className="flex items-center justify-center gap-2 rounded-2xl bg-blue-950 py-3 font-black text-white disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 py-4 font-black text-slate-950 disabled:opacity-50"
           >
-            <Check size={18} />
-            {working ? 'Traitement...' : 'Confirmer'}
+            <Check size={19} />
+            {working ? 'Traitement...' : 'Conserver cette zone'}
           </button>
         </div>
-      </div>
+      </footer>
     </div>
+  );
+}
+
+function CropHandleButton({
+  handle,
+  onStart,
+  onMove,
+  onEnd,
+}: {
+  handle: CropHandle;
+  onStart: (handle: CropHandle, event: React.PointerEvent<HTMLButtonElement>) => void;
+  onMove: (event: React.PointerEvent<HTMLButtonElement>) => void;
+  onEnd: (event: React.PointerEvent<HTMLButtonElement>) => void;
+}) {
+  const position: Record<CropHandle, string> = {
+    nw: '-left-3 -top-3 h-8 w-8 cursor-nwse-resize',
+    n: 'left-1/4 -top-3 h-7 w-1/2 cursor-ns-resize',
+    ne: '-right-3 -top-3 h-8 w-8 cursor-nesw-resize',
+    e: '-right-3 top-1/4 h-1/2 w-7 cursor-ew-resize',
+    se: '-bottom-3 -right-3 h-8 w-8 cursor-nwse-resize',
+    s: '-bottom-3 left-1/4 h-7 w-1/2 cursor-ns-resize',
+    sw: '-bottom-3 -left-3 h-8 w-8 cursor-nesw-resize',
+    w: '-left-3 top-1/4 h-1/2 w-7 cursor-ew-resize',
+  };
+
+  const marker: Record<CropHandle, string> = {
+    nw: 'left-3 top-3 border-l-[3px] border-t-[3px]',
+    n: 'left-1/2 top-3 h-[3px] w-12 -translate-x-1/2 bg-white',
+    ne: 'right-3 top-3 border-r-[3px] border-t-[3px]',
+    e: 'right-3 top-1/2 h-12 w-[3px] -translate-y-1/2 bg-white',
+    se: 'bottom-3 right-3 border-b-[3px] border-r-[3px]',
+    s: 'bottom-3 left-1/2 h-[3px] w-12 -translate-x-1/2 bg-white',
+    sw: 'bottom-3 left-3 border-b-[3px] border-l-[3px]',
+    w: 'left-3 top-1/2 h-12 w-[3px] -translate-y-1/2 bg-white',
+  };
+
+  return (
+    <button
+      type="button"
+      aria-label={`Ajuster le bord ${handle}`}
+      onPointerDown={event => onStart(handle, event)}
+      onPointerMove={onMove}
+      onPointerUp={onEnd}
+      onPointerCancel={onEnd}
+      className={`absolute z-20 touch-none ${position[handle]}`}
+    >
+      <span className={`pointer-events-none absolute h-5 w-5 border-white ${marker[handle]}`} />
+    </button>
   );
 }
