@@ -82,8 +82,6 @@ jobs:
 
           priority_set=0
           if [ "${#function_changes[@]}" -eq 0 ]; then
-            # Workflow-only commits are used to supersede a failed/stale deploy.
-            # Redeploy the smallest critical set first.
             priority_set=1
           else
             priority_set=1
@@ -95,6 +93,10 @@ jobs:
             done
           fi
 
+          # Firestore Eventarc triggers currently require project-level IAM bindings
+          # that the GitHub deployer is not allowed to grant. The application does
+          # not depend on them for interactive recovery because the callable local
+          # card endpoints self-heal verified historical accounts.
           if [ "$priority_set" -eq 1 ]; then
             cat > /tmp/market-cash-functions.txt <<'EOF'
           verifyApplicationSecret
@@ -105,20 +107,21 @@ jobs:
           getClientSecurityOverview
           revealLocalCardSecureData
           rotateMarketCashLocalCvv
-          onKycRequestApproved
-          onClientKycApproved
           EOF
-            echo 'Priority security/KYC deployment selected.'
+            echo 'Priority callable security/KYC recovery deployment selected.'
             echo '1' > /tmp/market-cash-batch-size.txt
           else
             node <<'NODE' > /tmp/market-cash-functions.txt
           const mod = require('./functions/lib/entry.js');
+          const blockedUntilIamReady = new Set(['onKycRequestApproved', 'onClientKycApproved']);
           for (const [name, value] of Object.entries(mod)) {
-            if (typeof value === 'function' && value.__endpoint) console.log(name);
+            if (typeof value === 'function' && value.__endpoint && !blockedUntilIamReady.has(name)) {
+              console.log(name);
+            }
           }
           NODE
             sort -u /tmp/market-cash-functions.txt -o /tmp/market-cash-functions.txt
-            echo 'General Functions change detected: full export set selected.'
+            echo 'General Functions change detected: deployable export set selected (Eventarc KYC triggers deferred until IAM is granted).'
             echo '2' > /tmp/market-cash-batch-size.txt
           fi
 
