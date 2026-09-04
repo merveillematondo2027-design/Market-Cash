@@ -76,14 +76,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          # A local-card-only change does not need to redeploy the full historical
-          # Market-Cash function set. That full sequential deployment can take
-          # hours and puts unnecessary pressure on the regional Cloud Run quota.
           local_card_only=0
+          card_identity_only=0
           if git rev-parse HEAD^ >/dev/null 2>&1; then
             mapfile -t function_changes < <(git diff --name-only HEAD^ HEAD -- functions/src)
             echo 'Changed function sources:'
             printf '%s\n' "${function_changes[@]:-}"
+
             local_card_only=1
             for file in "${function_changes[@]}"; do
               case "$file" in
@@ -93,6 +92,16 @@ jobs:
             done
             [ "${#function_changes[@]}" -gt 0 ] || local_card_only=0
             printf '%s\n' "${function_changes[@]}" | grep -qx 'functions/src/localCard.ts' || local_card_only=0
+
+            card_identity_only=1
+            for file in "${function_changes[@]}"; do
+              case "$file" in
+                functions/src/identifiers.ts|functions/src/walletV2.ts|functions/src/cardProducts.ts|functions/src/agentIdentityV2.ts|functions/src/merchantLookupV2.ts|functions/src/adminIdentity.ts|functions/src/cardSummarySecure.ts|functions/src/entry.ts) ;;
+                *) card_identity_only=0 ;;
+              esac
+            done
+            [ "${#function_changes[@]}" -gt 0 ] || card_identity_only=0
+            printf '%s\n' "${function_changes[@]}" | grep -qx 'functions/src/identifiers.ts' || card_identity_only=0
           fi
 
           if [ "$local_card_only" -eq 1 ]; then
@@ -106,6 +115,28 @@ jobs:
           adminResetVisaTestData
           EOF
             echo 'Local-card change detected: deploying only the dedicated endpoints.'
+          elif [ "$card_identity_only" -eq 1 ]; then
+            cat > /tmp/market-cash-functions.txt <<'EOF'
+          ensureMyDefaultIdentifiers
+          ensureWalletProfileV2
+          getMyWalletsV2
+          getMyMarketCashIdentityV2
+          lookupMarketCashRecipientV2
+          marketCashTransferV2
+          ensureLocalMarketCashCardV2
+          getMyLocalMarketCashCardsV2
+          revealLocalMarketCashCardBalance
+          merchantPaymentFromLocalCardV2
+          getMyAgentAccountSnapshotV2
+          adminGetAgentDetailsV2
+          adminFundAgentFloatV3
+          lookupAgentClientByMarketCashIdV2
+          agentCashInByMarketCashIdV2
+          lookupMerchantRecipientV2
+          adminEnsureUserDefaultIdentifier
+          getMyLocalCardSummarySecure
+          EOF
+            echo 'Cards/identity change detected: deploying only the new role-aware endpoints.'
           else
             node <<'NODE' > /tmp/market-cash-functions.txt
           const mod = require('./functions/lib/entry.js');
