@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { CreditCard, QrCode, RefreshCw, ShieldCheck, Store, WalletCards } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { ArrowLeft, CreditCard, QrCode, RefreshCw, ShieldCheck, Store, WalletCards } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import ClientCards from './Cards';
 import { agentWalletService, InternalCardSummary } from '../../services/agentWalletService';
@@ -10,6 +10,8 @@ const money = (value: number, currency: 'USD' | 'CDF') => currency === 'CDF'
   : `${Number(value || 0).toFixed(2)} USD`;
 
 export default function CardsHub() {
+  const [searchParams] = useSearchParams();
+  const visaMode = searchParams.get('visa') === 'buy';
   const [localCard, setLocalCard] = useState<InternalCardSummary | null>(null);
   const [loadingLocal, setLoadingLocal] = useState(true);
   const [localError, setLocalError] = useState('');
@@ -31,8 +33,28 @@ export default function CardsHub() {
   };
 
   useEffect(() => {
-    void loadLocalCard();
-  }, []);
+    if (!visaMode) void loadLocalCard();
+  }, [visaMode]);
+
+  if (visaMode) {
+    return (
+      <div className="pb-28">
+        <section className="mx-auto max-w-4xl px-3.5 pt-4 sm:px-6">
+          <Link to="/client/cards" className="inline-flex items-center gap-2 text-sm font-black text-slate-500">
+            <ArrowLeft size={16} /> Retour aux cartes
+          </Link>
+          <div className="mt-5 rounded-3xl border border-blue-100 bg-blue-50 p-5">
+            <p className="text-[10px] font-black uppercase tracking-[.18em] text-blue-700">Produit international séparé</p>
+            <h1 className="mt-1 text-2xl font-black text-slate-950">Acheter une carte Visa</h1>
+            <p className="mt-2 text-xs leading-5 text-slate-600">
+              Cet espace sert uniquement aux demandes d'achat Visa. La Visa n'est pas utilisée pour les retraits et paiements locaux Market-Cash.
+            </p>
+          </div>
+        </section>
+        <ClientCards />
+      </div>
+    );
+  }
 
   return (
     <div className="pb-28">
@@ -103,13 +125,25 @@ export default function CardsHub() {
           <b>Flux retenu :</b> dépôt → portefeuille principal → recharge de la carte locale → paiement ou retrait. La carte Visa reste un produit séparé et n’est pas utilisée pour les opérations locales.
         </div>
 
-        <div className="mt-10 flex items-center gap-3 border-t pt-8">
-          <div className="grid h-11 w-11 place-items-center rounded-2xl bg-slate-100 text-blue-950"><CreditCard size={22} /></div>
-          <div><p className="text-[10px] font-black uppercase tracking-[.16em] text-slate-400">Produit séparé</p><h2 className="text-xl font-black text-slate-950">Cartes Visa</h2><p className="text-xs text-slate-500">Aucune Visa n’est attribuée automatiquement. Le client peut uniquement lancer une demande d’achat dans cet espace.</p></div>
+        <div className="mt-10 border-t pt-8">
+          <div className="rounded-3xl border bg-white p-5 shadow-sm">
+            <div className="flex items-start gap-3">
+              <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-slate-100 text-blue-950"><CreditCard size={23} /></div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-black uppercase tracking-[.16em] text-slate-400">Produit séparé</p>
+                <h2 className="mt-1 text-xl font-black text-slate-950">Carte Visa</h2>
+                <p className="mt-1 text-xs leading-5 text-slate-500">Aucune Visa n'est attribuée automatiquement. Le client peut uniquement lancer une demande d'achat.</p>
+                <div className="mt-4 rounded-2xl bg-slate-50 p-3 text-xs text-slate-600">
+                  <b>État actuel :</b> 0 Visa attribuée automatiquement. Les anciennes cartes de test ont été retirées du parcours client.
+                </div>
+                <Link to="/client/cards?visa=buy" className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-4 text-sm font-black text-white shadow-sm sm:w-auto">
+                  <CreditCard size={18} /> Acheter une carte Visa
+                </Link>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
-
-      <ClientCards />
     </div>
   );
 }
