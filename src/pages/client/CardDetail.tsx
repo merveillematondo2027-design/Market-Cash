@@ -47,6 +47,7 @@ export default function CardDetail({kind,cardId}:CardDetailProps){
   const expiryStart=kind==='local'?localSecure?.expiryStart||localCard?.expiryStart:visaSecure?.expiryStart;
   const expiryEnd=kind==='local'?localSecure?.expiryEnd||localCard?.expiryEnd:visaSecure?.expiryEnd;
   const cvv=kind==='local'?localSecure?.cvv:visaSecure?.cvv;
+  const qrData=kind==='local'?localCard?.qrData:undefined;
   const cardExists=kind==='local'?!!localCard:!!visaCard;
 
   const requestBalance=()=>{if(showBalance){setShowBalance(false);return}setSecurityAction('balance')};
@@ -63,7 +64,7 @@ export default function CardDetail({kind,cardId}:CardDetailProps){
 
   return <div className="mx-auto max-w-4xl px-3.5 pb-28 pt-4 sm:px-6">
     <Link to="/client/cards" className="inline-flex items-center gap-2 text-sm font-black text-slate-500"><ArrowLeft size={17}/>Mes cartes</Link>
-    <div className="mx-auto mt-5 max-w-xl">{loading?<div className="grid aspect-[1.586/1] place-items-center rounded-[1.65rem] bg-slate-100 text-slate-400"><RefreshCw className="animate-spin" size={24}/></div>:cardExists?<CardProductFace variant={kind} holder={holder} number={number} expiryStart={expiryStart} expiryEnd={expiryEnd} cvv={cvv} revealed={detailsRevealed} side={standardSide} onToggleReveal={requestDetails} onFlip={kind==='standard'?()=>setStandardSide(side=>side==='front'?'back':'front'):undefined}/>:<div className="rounded-3xl border border-dashed bg-white p-8 text-center"><p className="font-black text-slate-900">Carte indisponible</p><p className="mt-2 text-sm text-slate-500">Cette carte n'est pas encore attribuée à votre compte.</p></div>}</div>
+    <div className="mx-auto mt-5 max-w-xl">{loading?<div className="grid aspect-[1.586/1] place-items-center rounded-[1.65rem] bg-slate-100 text-slate-400"><RefreshCw className="animate-spin" size={24}/></div>:cardExists?<CardProductFace variant={kind} holder={holder} number={number} expiryStart={expiryStart} expiryEnd={expiryEnd} cvv={cvv} qrData={qrData} revealed={detailsRevealed} side={standardSide} onToggleReveal={requestDetails} onFlip={kind==='standard'?()=>setStandardSide(side=>side==='front'?'back':'front'):undefined}/>:<div className="rounded-3xl border border-dashed bg-white p-8 text-center"><p className="font-black text-slate-900">Carte indisponible</p><p className="mt-2 text-sm text-slate-500">Cette carte n'est pas encore attribuée à votre compte.</p></div>}</div>
 
     {cardExists&&<><section className="mx-auto mt-5 max-w-xl rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-black uppercase tracking-[.16em] text-slate-400">Solde de la carte</p><p className="mt-2 text-2xl font-black text-blue-950">{!showBalance?'••••••':kind==='local'?money(localBalance,currency):visaBalance===undefined?'Indisponible':money(visaBalance,currency)}</p>{showBalance&&kind!=='local'&&visaBalance===undefined&&<p className="mt-1 text-[10px] text-slate-400">Le partenaire émetteur n'a pas fourni de solde {currency}.</p>}</div><button type="button" onClick={requestBalance} className="grid h-12 w-12 place-items-center rounded-2xl bg-slate-100 text-blue-950" aria-label={showBalance?'Masquer le solde':'Afficher le solde'}>{showBalance?<EyeOff size={21}/>:<Eye size={21}/>}</button></div>
