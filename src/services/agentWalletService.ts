@@ -104,6 +104,11 @@ export interface VisaResetResult {
 }
 
 const call = <TReq,TRes>(name:string) => httpsCallable<TReq,TRes>(functions,name);
+const normalizeLocalCardReferenceForCallable=(value:string)=>{
+  const trimmed=String(value||'').trim();
+  if(/^MCL-[A-Z0-9_-]{4,120}$/i.test(trimmed))return `MARKET-CASH-CARD:${trimmed.toUpperCase()}`;
+  return trimmed;
+};
 
 export const agentWalletService = {
   ensureWalletProfile: async() => (await call<Record<string,never>,WalletServerSnapshot & {ok:boolean}>('ensureWalletProfile')({})).data,
@@ -130,8 +135,14 @@ export const agentWalletService = {
 
   lookupAgentClient: async(marketCashId:string) => (await call<{marketCashId:string},AgentClientLookup>('lookupAgentClientByMarketCashId')({marketCashId})).data,
   cashInToMarketCashId: async(input:{marketCashId:string;currency:WalletCurrency;amount:number;pin:string;idempotencyKey:string}) => (await call<typeof input,{ok:boolean;reference:string;transactionId:string}>('agentCashInByMarketCashId')(input)).data,
-  lookupLocalCardForWithdrawal: async(cardReference:string) => (await call<{cardReference:string},LocalCardWithdrawalLookup>('lookupLocalMarketCashCardForWithdrawal')({cardReference})).data,
-  cashOutFromLocalCard: async(input:{cardReference:string;currency:WalletCurrency;amount:number;clientPin:string;idempotencyKey:string}) => (await call<typeof input,{ok:boolean;reference:string;transactionId:string;amount:number;currency:WalletCurrency}>('agentLocalCardCashOut')(input)).data,
+  lookupLocalCardForWithdrawal: async(cardReference:string) => {
+    const normalized=normalizeLocalCardReferenceForCallable(cardReference);
+    return (await call<{cardReference:string},LocalCardWithdrawalLookup>('lookupLocalMarketCashCardForWithdrawal')({cardReference:normalized})).data;
+  },
+  cashOutFromLocalCard: async(input:{cardReference:string;currency:WalletCurrency;amount:number;clientPin:string;idempotencyKey:string}) => {
+    const payload={...input,cardReference:normalizeLocalCardReferenceForCallable(input.cardReference)};
+    return (await call<typeof payload,{ok:boolean;reference:string;transactionId:string;amount:number;currency:WalletCurrency}>('agentLocalCardCashOut')(payload)).data;
+  },
 
   resetVisaTestDataOnce: async() => (await call<Record<string,never>,VisaResetResult>('adminResetVisaTestData')({})).data,
 
