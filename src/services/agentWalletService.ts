@@ -71,7 +71,25 @@ export interface InternalCardSummary {
   maskedNumber: string;
   status: string;
   qrData?: string;
+  expiryStart?: string;
+  expiryEnd?: string;
   balances: Partial<Record<WalletCurrency, number>>;
+}
+
+export interface LocalCardSecureData {
+  cardId: string;
+  cardNumber: string;
+  cardHolder: string;
+  expiryStart: string;
+  expiryEnd: string;
+  cvv: string;
+}
+
+export interface ClientSecurityOverview {
+  hasApplicationPin: boolean;
+  hasLocalCvv: boolean;
+  cvvVersion: number;
+  cvvUpdatedAt: number;
 }
 
 export interface WalletDepositRequest {
@@ -117,21 +135,31 @@ export const agentWalletService = {
   getMyMarketCashIdentity: async() => (await call<Record<string,never>,MarketCashIdentity>('getMyMarketCashIdentity')({})).data,
 
   lookupMarketCashRecipient: async(marketCashId:string) => (await call<{marketCashId:string},MarketCashRecipient>('lookupMarketCashRecipient')({marketCashId})).data,
-  transferMarketCash: async(input:{marketCashId:string;currency:WalletCurrency;amount:number;pin:string;idempotencyKey:string}) => (await call<typeof input,{ok:boolean;reference:string;transactionId:string}>('marketCashTransfer')(input)).data,
+  transferMarketCash: async(input:{marketCashId:string;currency:WalletCurrency;amount:number;cvv:string;idempotencyKey:string}) => (await call<typeof input,{ok:boolean;reference:string;transactionId:string}>('marketCashTransferWithCvv')(input)).data,
 
   lookupMerchantRecipient: async(marketCashId:string) => (await call<{marketCashId:string},MarketCashRecipient>('lookupMerchantRecipient')({marketCashId})).data,
-  payMerchant: async(input:{cardId:string;marketCashId:string;currency:WalletCurrency;amount:number;pin:string;idempotencyKey:string}) => (await call<typeof input,{ok:boolean;reference:string;transactionId:string;merchantName:string}>('merchantPaymentFromLocalCardV2')(input)).data,
+  payMerchant: async(input:{cardId:string;marketCashId:string;currency:WalletCurrency;amount:number;cvv:string;idempotencyKey:string}) => (await call<typeof input,{ok:boolean;reference:string;transactionId:string;merchantName:string}>('merchantPaymentFromLocalCardWithCvv')(input)).data,
 
   createWithdrawalAuthorization: async(input:{currency:WalletCurrency;amount:number;pin:string}) => (await call<typeof input,WithdrawalAuthorization>('createWithdrawalAuthorization')(input)).data,
   cancelWithdrawalAuthorization: async(authorizationId:string) => (await call<{authorizationId:string},{ok:boolean}>('cancelWithdrawalAuthorization')({authorizationId})).data,
   inspectWithdrawalAuthorization: async(code:string) => (await call<{code:string},WithdrawalInspection>('inspectWithdrawalAuthorization')({code})).data,
   redeemWithdrawalAuthorization: async(input:{code:string;pin:string;idempotencyKey:string}) => (await call<typeof input,{ok:boolean;reference:string;transactionId:string;amount:number;currency:WalletCurrency}>('redeemWithdrawalAuthorization')(input)).data,
 
-  ensureLocalCard: async() => (await call<Record<string,never>,{ok:boolean;cardId:string;cardIdentifier:string}>('activateLocalMarketCashCard')({})).data,
+  ensureLocalCard: async() => {
+    const created=(await call<Record<string,never>,{ok:boolean;cardId:string;cardIdentifier:string}>('activateLocalMarketCashCard')({})).data;
+    await call<Record<string,never>,{ok:boolean;cardId:string;expiryStart:string;expiryEnd:string;cvvVersion:number}>('syncLocalCardSecurityProfile')({});
+    return created;
+  },
   getMyInternalCards: async() => (await call<Record<string,never>,{cards:InternalCardSummary[]}>('getMyLocalMarketCashCardsV2')({})).data.cards,
-  fundInternalCard: async(input:{cardId:string;currency:WalletCurrency;amount:number;pin:string;idempotencyKey:string}) => (await call<typeof input,{ok:boolean;reference:string;transactionId:string}>('walletToLocalMarketCashCardV2')(input)).data,
+  fundInternalCard: async(input:{cardId:string;currency:WalletCurrency;amount:number;cvv:string;idempotencyKey:string}) => (await call<typeof input,{ok:boolean;reference:string;transactionId:string}>('walletToLocalCardWithCvv')(input)).data,
   getMyWalletHistory: async() => (await call<Record<string,never>,{transactions:any[]}>('getMyWalletHistory')({})).data.transactions,
   createWalletDeposit: async(input:{rail:'mobile_money'|'bank';currency:WalletCurrency;amount:number;network?:string;phone?:string;bank?:string;idempotencyKey:string}) => (await call<typeof input,WalletDepositRequest>('createWalletDeposit')(input)).data,
+
+  verifyApplicationSecret: async(pin:string) => (await call<{pin:string},{ok:boolean}>('verifyApplicationSecret')({pin})).data,
+  getClientSecurityOverview: async() => (await call<Record<string,never>,ClientSecurityOverview>('getClientSecurityOverview')({})).data,
+  revealLocalCardSecureData: async(pin:string) => (await call<{pin:string},LocalCardSecureData>('revealLocalCardSecureData')({pin})).data,
+  rotateLocalCvv: async(pin:string) => (await call<{pin:string},{ok:boolean;cvv:string;version:number;updatedAt:number}>('rotateMarketCashLocalCvv')({pin})).data,
+  changeApplicationPin: async(input:{currentPin:string;newPin:string}) => (await call<typeof input,{ok:boolean;pinChangedAt:number}>('changeApplicationPin')(input)).data,
 
   lookupAgentClient: async(marketCashId:string) => (await call<{marketCashId:string},AgentClientLookup>('lookupAgentClientByMarketCashId')({marketCashId})).data,
   cashInToMarketCashId: async(input:{marketCashId:string;currency:WalletCurrency;amount:number;pin:string;idempotencyKey:string}) => (await call<typeof input,{ok:boolean;reference:string;transactionId:string}>('agentCashInByMarketCashId')(input)).data,
@@ -139,9 +167,9 @@ export const agentWalletService = {
     const normalized=normalizeLocalCardReferenceForCallable(cardReference);
     return (await call<{cardReference:string},LocalCardWithdrawalLookup>('lookupLocalMarketCashCardForWithdrawal')({cardReference:normalized})).data;
   },
-  cashOutFromLocalCard: async(input:{cardReference:string;currency:WalletCurrency;amount:number;clientPin:string;idempotencyKey:string}) => {
+  cashOutFromLocalCard: async(input:{cardReference:string;currency:WalletCurrency;amount:number;clientCvv:string;idempotencyKey:string}) => {
     const payload={...input,cardReference:normalizeLocalCardReferenceForCallable(input.cardReference)};
-    return (await call<typeof payload,{ok:boolean;reference:string;transactionId:string;amount:number;currency:WalletCurrency}>('agentLocalCardCashOut')(payload)).data;
+    return (await call<typeof payload,{ok:boolean;reference:string;transactionId:string;amount:number;currency:WalletCurrency}>('agentLocalCardCashOutWithCvv')(payload)).data;
   },
 
   resetVisaTestDataOnce: async() => (await call<Record<string,never>,VisaResetResult>('adminResetVisaTestData')({})).data,
