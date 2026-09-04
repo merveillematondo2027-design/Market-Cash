@@ -9,6 +9,10 @@ on:
       - '.github/workflows/functions-deploy.yml'
   workflow_dispatch:
 
+concurrency:
+  group: market-cash-functions-deploy
+  cancel-in-progress: false
+
 jobs:
   deploy-functions:
     runs-on: ubuntu-latest
@@ -19,6 +23,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -69,7 +75,39 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node <<'NODE' > /tmp/market-cash-functions.txt
+
+          # A local-card-only change does not need to redeploy the full historical
+          # Market-Cash function set. That full sequential deployment can take
+          # hours and puts unnecessary pressure on the regional Cloud Run quota.
+          local_card_only=0
+          if git rev-parse HEAD^ >/dev/null 2>&1; then
+            mapfile -t function_changes < <(git diff --name-only HEAD^ HEAD -- functions/src)
+            echo 'Changed function sources:'
+            printf '%s\n' "${function_changes[@]:-}"
+            local_card_only=1
+            for file in "${function_changes[@]}"; do
+              case "$file" in
+                functions/src/localCard.ts|functions/src/entry.ts) ;;
+                *) local_card_only=0 ;;
+              esac
+            done
+            [ "${#function_changes[@]}" -gt 0 ] || local_card_only=0
+            printf '%s\n' "${function_changes[@]}" | grep -qx 'functions/src/localCard.ts' || local_card_only=0
+          fi
+
+          if [ "$local_card_only" -eq 1 ]; then
+            cat > /tmp/market-cash-functions.txt <<'EOF'
+          ensureLocalMarketCashCard
+          getMyLocalMarketCashCards
+          walletToLocalMarketCashCard
+          merchantPaymentFromLocalCard
+          lookupLocalMarketCashCardForWithdrawal
+          agentLocalCardCashOut
+          adminResetVisaTestData
+          EOF
+            echo 'Local-card change detected: deploying only the dedicated endpoints.'
+          else
+            node <<'NODE' > /tmp/market-cash-functions.txt
           const mod = require('./functions/lib/entry.js');
           for (const [name, value] of Object.entries(mod)) {
             if (typeof value === 'function' && value.__endpoint) {
@@ -77,7 +115,10 @@ jobs:
             }
           }
           NODE
-          echo 'Functions discovered:'
+            echo 'General Functions change detected: full export set selected.'
+          fi
+
+          echo 'Functions selected:'
           cat /tmp/market-cash-functions.txt
           test -s /tmp/market-cash-functions.txt
 

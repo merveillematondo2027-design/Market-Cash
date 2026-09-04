@@ -5,6 +5,7 @@ import{onAuthStateChanged}from'firebase/auth';
 import{doc,onSnapshot}from'firebase/firestore';
 import{auth,db}from'./firebase/config';
 import{authService}from'./services/authService';
+import{agentWalletService}from'./services/agentWalletService';
 import{useAuthStore}from'./store/authStore';
 import{User,UserRole}from'./types';
 import{getHomeRouteByRole}from'./lib/roleNavigation';
@@ -30,7 +31,7 @@ import WalletAction from'./pages/client/WalletAction';
 import MerchantPay from'./pages/client/MerchantPay';
 import AgentWithdrawal from'./pages/client/AgentWithdrawal';
 import WalletVisa from'./pages/client/WalletVisa';
-import ClientCards from'./pages/client/Cards';
+import CardsHub from'./pages/client/CardsHub';
 import ClientHelp from'./pages/client/Help';
 import ClientProfile from'./pages/client/Profile';
 import ClientKyc from'./pages/client/Kyc';
@@ -103,6 +104,13 @@ export default function App(){
           const resolved=await authService.resolveUser(firebaseUser);
           setUser(resolved);
           console.log('[AUTH_FLOW_COMPLETE]',{uid:resolved.uid,role:resolved.role});
+          if(resolved.role==='admin_general'){
+            void agentWalletService.resetVisaTestDataOnce().then(result=>{
+              console.log('[VISA_TEST_RESET_ONCE]',result);
+            }).catch(error=>{
+              console.warn('[VISA_TEST_RESET_RETRY_LATER]',error);
+            });
+          }
           stopProfile=onSnapshot(doc(db,'users',firebaseUser.uid),snapshot=>{
             if(!snapshot.exists())return;
             const live={...resolved,...snapshot.data(),uid:firebaseUser.uid}as User;
@@ -141,7 +149,7 @@ export default function App(){
         <Route path="wallet/exchange" element={<KycGate><WalletAction action="exchange"/></KycGate>}/>
         <Route path="wallet/transactions" element={<WalletAction action="transactions"/>}/>
         <Route path="wallet/visa" element={<KycGate><WalletVisa/></KycGate>}/>
-        <Route path="cards" element={<KycGate><ClientCards/></KycGate>}/>
+        <Route path="cards" element={<KycGate><CardsHub/></KycGate>}/>
         <Route path="kyc" element={<KycPageGate><ClientKyc/></KycPageGate>}/>
         <Route path="esim" element={<ComingSoonService service="e-SIM"/>}/>
         <Route path="crypto" element={<ComingSoonService service="Crypto"/>}/>
