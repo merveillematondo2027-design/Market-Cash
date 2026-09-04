@@ -13,6 +13,14 @@ import LocalCardTopup from'./LocalCardTopup';
 
 type RevealTarget={kind:CardProductVariant;id:string}|null;
 
+const friendlyLocalError=(error:any)=>{
+  const code=String(error?.code||'').toLowerCase();
+  const message=String(error?.message||'');
+  if(code.includes('internal')||/^internal\s*\[?0\]?$/i.test(message.trim())||message.toLowerCase().includes('internal [0]'))return 'Le service de carte locale est momentanément en cours de synchronisation.';
+  if(code.includes('failed-precondition')&&message.toLowerCase().includes('kyc'))return 'La validation KYC n’est pas encore synchronisée avec le service de carte.';
+  return message||'Impossible de synchroniser la carte locale pour le moment.';
+};
+
 export default function CardsHub(){
   const{user}=useAuthStore();
   const navigate=useNavigate();
@@ -27,16 +35,29 @@ export default function CardsHub(){
   const[visaSecure,setVisaSecure]=useState<Record<string,VisaSecureData>>({});
   const[loadingLocal,setLoadingLocal]=useState(true);
   const[loadingVisa,setLoadingVisa]=useState(true);
+  const[localError,setLocalError]=useState('');
+  const[localRetry,setLocalRetry]=useState(0);
   const[revealed,setRevealed]=useState<Record<string,boolean>>({});
   const[pendingReveal,setPendingReveal]=useState<RevealTarget>(null);
   const[securityBusy,setSecurityBusy]=useState(false);
 
   useEffect(()=>{
     if(!user?.uid||visaMode||selectedKind)return;
-    let active=true;setLoadingLocal(true);
-    (async()=>{try{await agentWalletService.ensureLocalCard();const cards=await agentWalletService.getMyInternalCards();if(active)setLocalCard(cards[0]||null)}catch(error){console.warn('[LOCAL_CARD_AUTO_READY_ERROR]',error);if(active)setLocalCard(null)}finally{if(active)setLoadingLocal(false)}})();
+    let active=true;
+    setLoadingLocal(true);
+    setLocalError('');
+    (async()=>{
+      try{
+        await agentWalletService.ensureLocalCard();
+        const cards=await agentWalletService.getMyInternalCards();
+        if(active){setLocalCard(cards[0]||null);if(!cards[0])setLocalError('Votre carte n’a pas encore pu être créée. Réessayez la synchronisation.');}
+      }catch(error:any){
+        console.warn('[LOCAL_CARD_AUTO_READY_ERROR]',error);
+        if(active){setLocalCard(null);setLocalError(friendlyLocalError(error));}
+      }finally{if(active)setLoadingLocal(false)}
+    })();
     return()=>{active=false};
-  },[user?.uid,visaMode,selectedKind]);
+  },[user?.uid,visaMode,selectedKind,localRetry]);
 
   useEffect(()=>{
     if(!user?.uid||visaMode||selectedKind)return;
@@ -70,12 +91,13 @@ export default function CardsHub(){
   if(selectedKind&&['local','standard','gold'].includes(selectedKind))return <CardDetail kind={selectedKind} cardId={selectedCardId}/>;
 
   const localKey=localCard?.cardId||'local';
+  const kycApproved=user?.kycStatus==='approved';
   return <div className="mx-auto max-w-4xl px-3.5 pb-28 pt-4 sm:px-6">
     <h1 className="mb-6 text-2xl font-black tracking-tight text-slate-950">Cartes</h1>
 
     <section className="mb-8">
       <div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-black uppercase tracking-[.12em] text-blue-950">Market-Cash Locale</h2>{loadingLocal&&<RefreshCw size={15} className="animate-spin text-slate-400"/>}</div>
-      {localCard?<div role="button" tabIndex={0} onClick={()=>openCard('local',localCard.cardId)} onKeyDown={e=>{if(e.key==='Enter'||e.key===' ')openCard('local',localCard.cardId)}} className="cursor-pointer rounded-[1.65rem] outline-none ring-blue-300 focus:ring-4"><CardProductFace variant="local" holder={localSecure?.cardHolder||localCard.cardHolder||user?.displayName} number={localSecure?.cardNumber||localCard.maskedNumber} expiryStart={localSecure?.expiryStart||localCard.expiryStart} expiryEnd={localSecure?.expiryEnd||localCard.expiryEnd} cvv={localSecure?.cvv} revealed={!!revealed[localKey]} onToggleReveal={()=>askReveal('local',localKey)} className="transition duration-200 active:scale-[.985]"/></div>:!loadingLocal?<div className="rounded-3xl border border-dashed border-amber-300 bg-amber-50 p-5"><p className="font-black text-amber-900">Carte locale indisponible</p><p className="mt-1 text-sm text-amber-800">La carte gratuite est créée automatiquement dès l'approbation du KYC.</p></div>:null}
+      {localCard?<div role="button" tabIndex={0} onClick={()=>openCard('local',localCard.cardId)} onKeyDown={e=>{if(e.key==='Enter'||e.key===' ')openCard('local',localCard.cardId)}} className="cursor-pointer rounded-[1.65rem] outline-none ring-blue-300 focus:ring-4"><CardProductFace variant="local" holder={localSecure?.cardHolder||localCard.cardHolder||user?.displayName} number={localSecure?.cardNumber||localCard.maskedNumber} expiryStart={localSecure?.expiryStart||localCard.expiryStart} expiryEnd={localSecure?.expiryEnd||localCard.expiryEnd} cvv={localSecure?.cvv} revealed={!!revealed[localKey]} onToggleReveal={()=>askReveal('local',localKey)} className="transition duration-200 active:scale-[.985]"/></div>:!loadingLocal?<div className={`rounded-3xl border border-dashed p-5 ${kycApproved?'border-blue-200 bg-blue-50':'border-amber-300 bg-amber-50'}`}><p className={`font-black ${kycApproved?'text-blue-950':'text-amber-900'}`}>{kycApproved?'Activation de la carte locale':'Carte locale non encore active'}</p><p className={`mt-1 text-sm leading-6 ${kycApproved?'text-blue-800':'text-amber-800'}`}>{kycApproved?(localError||'Votre KYC est vérifié. La carte gratuite doit être créée automatiquement.'):(localError||"La carte gratuite devient disponible après l'approbation du KYC.")}</p><button onClick={()=>setLocalRetry(value=>value+1)} className={`mt-4 inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-black ${kycApproved?'bg-blue-950 text-white':'bg-white text-amber-900'}`}><RefreshCw size={14}/>Réessayer la synchronisation</button></div>:null}
       {localCard&&<div className="mt-3 grid grid-cols-2 gap-2"><Link to={`/client/cards?card=local&cardId=${encodeURIComponent(localCard.cardId)}`} className="flex items-center justify-center gap-2 rounded-2xl border bg-white px-4 py-3 text-sm font-black text-blue-950"><ShieldCheck size={16}/>Détails</Link><Link to="/client/cards?card=local&action=topup" className="flex items-center justify-center gap-2 rounded-2xl bg-blue-950 px-4 py-3 text-sm font-black text-white"><Plus size={16}/>Recharger</Link></div>}
     </section>
 
