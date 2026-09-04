@@ -76,3 +76,4 @@ export * from './agentTerminal';
 export * from './agentAdmin';
 export * from './localCard';
 export * from './localCardExplicit';
+export * from './security';
