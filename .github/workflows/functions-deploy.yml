@@ -11,7 +11,7 @@ on:
 
 concurrency:
   group: market-cash-functions-deploy
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   deploy-functions:
@@ -71,116 +71,120 @@ jobs:
       - name: Install Firebase CLI
         run: npm install -g firebase-tools
 
-      - name: Discover Firebase function exports
+      - name: Select Functions to deploy
         shell: bash
         run: |
           set -euo pipefail
 
-          # Targeted deploys avoid redeploying the complete historical function
-          # set when only the local-card rail or legacy spending guards changed.
-          explicit_local_card_only=0
-          local_card_only=0
-          legacy_spending_guard_only=0
-          if git rev-parse HEAD^ >/dev/null 2>&1; then
-            mapfile -t function_changes < <(git diff --name-only HEAD^ HEAD -- functions/src)
-            echo 'Changed function sources:'
-            printf '%s\n' "${function_changes[@]:-}"
+          mapfile -t function_changes < <(git diff --name-only HEAD^ HEAD -- functions/src || true)
+          echo 'Changed function sources:'
+          printf '%s\n' "${function_changes[@]:-}"
 
-            if [ "${#function_changes[@]}" -eq 1 ] \
-              && [ "${function_changes[0]}" = 'functions/src/entry.ts' ] \
-              && grep -q 'LEGACY_LOCAL_CARD_SPENDING_GUARD' functions/src/entry.ts; then
-              legacy_spending_guard_only=1
-            fi
-
-            explicit_local_card_only=1
+          coherence_set=0
+          if [ "${#function_changes[@]}" -eq 0 ]; then
+            # A workflow-only deployment commit is used to supersede a stale
+            # deployment. Deploy the complete card/security coherence set.
+            coherence_set=1
+          else
+            coherence_set=1
             for file in "${function_changes[@]}"; do
               case "$file" in
-                functions/src/localCardExplicit.ts|functions/src/entry.ts) ;;
-                *) explicit_local_card_only=0 ;;
+                functions/src/security.ts|functions/src/identityV2.ts|functions/src/cardProvisioningV2.ts|functions/src/visaSecurity.ts|functions/src/entry.ts|functions/src/localCard.ts|functions/src/localCardExplicit.ts) ;;
+                *) coherence_set=0 ;;
               esac
             done
-            [ "${#function_changes[@]}" -gt 0 ] || explicit_local_card_only=0
-            printf '%s\n' "${function_changes[@]}" | grep -qx 'functions/src/localCardExplicit.ts' || explicit_local_card_only=0
-
-            local_card_only=1
-            for file in "${function_changes[@]}"; do
-              case "$file" in
-                functions/src/localCard.ts|functions/src/entry.ts) ;;
-                *) local_card_only=0 ;;
-              esac
-            done
-            [ "${#function_changes[@]}" -gt 0 ] || local_card_only=0
-            printf '%s\n' "${function_changes[@]}" | grep -qx 'functions/src/localCard.ts' || local_card_only=0
           fi
 
-          if [ "$legacy_spending_guard_only" -eq 1 ]; then
+          if [ "$coherence_set" -eq 1 ]; then
             cat > /tmp/market-cash-functions.txt <<'EOF'
+          verifyApplicationSecret
+          syncLocalCardSecurityProfile
+          getClientSecurityOverview
+          revealLocalCardSecureData
+          rotateMarketCashLocalCvv
+          changeApplicationPin
+          walletToLocalCardWithCvv
+          marketCashTransferWithCvv
+          merchantPaymentFromLocalCardWithCvv
+          agentLocalCardCashOutWithCvv
+          ensureWalletProfileV2
+          getMyWalletsV2
+          getMyMarketCashIdentityV2
+          lookupMarketCashRecipientV2
+          lookupMerchantRecipientV2
+          lookupAgentClientByMarketCashIdV2
+          agentCashInByMarketCashIdV2
+          merchantPaymentFromLocalCardWithCvvV2
+          onClientKycApproved
+          activateLocalMarketCashCardV2
+          getMyLocalMarketCashCardsV3
+          getMyVisaCardSummaries
+          revealVisaCardSecureData
+          lookupLocalMarketCashCardForWithdrawal
           merchantPayment
           createWithdrawalAuthorization
           redeemWithdrawalAuthorization
           agentCashOut
           walletToInternalCard
           agentCardCashOut
-          EOF
-            echo 'Legacy spending guard change detected: deploying only blocked legacy endpoints.'
-          elif [ "$explicit_local_card_only" -eq 1 ]; then
-            cat > /tmp/market-cash-functions.txt <<'EOF'
-          activateLocalMarketCashCard
-          getMyLocalMarketCashCardsV2
+          marketCashTransfer
           walletToLocalMarketCashCardV2
           merchantPaymentFromLocalCardV2
-          EOF
-            echo 'Explicit local-card change detected: deploying only the V2 local-card endpoints.'
-          elif [ "$local_card_only" -eq 1 ]; then
-            cat > /tmp/market-cash-functions.txt <<'EOF'
-          ensureLocalMarketCashCard
-          getMyLocalMarketCashCards
-          walletToLocalMarketCashCard
-          merchantPaymentFromLocalCard
-          lookupLocalMarketCashCardForWithdrawal
           agentLocalCardCashOut
-          adminResetVisaTestData
           EOF
-            echo 'Local-card change detected: deploying only the dedicated endpoints.'
+            echo 'Card/security coherence change detected: deploying the critical production set.'
           else
             node <<'NODE' > /tmp/market-cash-functions.txt
           const mod = require('./functions/lib/entry.js');
           for (const [name, value] of Object.entries(mod)) {
-            if (typeof value === 'function' && value.__endpoint) {
-              console.log(name);
-            }
+            if (typeof value === 'function' && value.__endpoint) console.log(name);
           }
           NODE
             echo 'General Functions change detected: full export set selected.'
           fi
 
+          sort -u /tmp/market-cash-functions.txt -o /tmp/market-cash-functions.txt
           echo 'Functions selected:'
           cat /tmp/market-cash-functions.txt
           test -s /tmp/market-cash-functions.txt
 
-      - name: Deploy Cloud Functions sequentially with retry
+      - name: Deploy Cloud Functions in small batches with retry
         shell: bash
         run: |
           set -uo pipefail
-          while IFS= read -r fn; do
-            [ -z "$fn" ] && continue
+          mapfile -t functions_to_deploy < /tmp/market-cash-functions.txt
+          batch_size=4
+
+          for ((i=0; i<${#functions_to_deploy[@]}; i+=batch_size)); do
+            only=''
+            batch=()
+            for ((j=i; j<i+batch_size && j<${#functions_to_deploy[@]}; j++)); do
+              fn="${functions_to_deploy[$j]}"
+              [ -z "$fn" ] && continue
+              batch+=("$fn")
+              if [ -z "$only" ]; then
+                only="functions:${fn}"
+              else
+                only="${only},functions:${fn}"
+              fi
+            done
+
+            [ -z "$only" ] && continue
             success=0
             for attempt in 1 2 3; do
-              echo "Deploying functions:${fn} (attempt ${attempt}/3)"
-              if firebase deploy \
-                --only "functions:${fn}" \
-                --project automarket-fintech \
-                --non-interactive; then
+              echo "Deploying batch: ${batch[*]} (attempt ${attempt}/3)"
+              if firebase deploy --only "$only" --project automarket-fintech --non-interactive; then
                 success=1
                 break
               fi
               wait_seconds=$((attempt * 30))
-              echo "Transient deployment failure for ${fn}; retrying in ${wait_seconds}s..."
+              echo "Transient deployment failure; retrying batch in ${wait_seconds}s..."
               sleep "$wait_seconds"
             done
+
             if [ "$success" -ne 1 ]; then
-              echo "Function ${fn} failed after 3 attempts."
+              echo "Batch failed after 3 attempts: ${batch[*]}"
               exit 1
             fi
-            sleep 10
-          done < /tmp/market-cash-functions.txt
+            sleep 8
+          done
