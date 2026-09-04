@@ -1,70 +1,93 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuthStore } from '../../store/authStore';
-import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../../firebase/config';
-import { getHomeRouteByRole } from '../../lib/roleNavigation';
-import toast from 'react-hot-toast';
-import LogoutModal from '../../components/LogoutModal';
+import React,{useEffect,useMemo,useState}from'react';
+import{useNavigate}from'react-router-dom';
+import{deleteField,doc,updateDoc}from'firebase/firestore';
+import{KeyRound,ShieldCheck}from'lucide-react';
+import toast from'react-hot-toast';
+import{useAuthStore}from'../../store/authStore';
+import{db}from'../../firebase/config';
+import{getHomeRouteByRole}from'../../lib/roleNavigation';
+import LogoutModal from'../../components/LogoutModal';
 
-export default function PinScreen() {
-  const navigate = useNavigate();
-  const { user, setUser, setPinVerified } = useAuthStore();
-  const [pin, setPin] = useState('');
-  const [confirmPin, setConfirmPin] = useState('');
-  const [isSettingUp, setIsSettingUp] = useState(false);
-  const [step, setStep] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [showLogoutModal, setShowLogoutModal] = useState(false);
+async function hashPin(value:string){const encoded=new TextEncoder().encode(value);const buffer=await crypto.subtle.digest('SHA-256',encoded);return Array.from(new Uint8Array(buffer)).map(b=>b.toString(16).padStart(2,'0')).join('')}
 
-  useEffect(() => {
-    if (!user) { navigate('/login'); return; }
-    if (user.role !== 'client') { navigate(getHomeRouteByRole(user.role)); return; }
-    if (!user.pinHash) setIsSettingUp(true);
-  }, [user, navigate]);
+export default function PinScreen(){
+  const navigate=useNavigate();
+  const{user,setUser,setPinVerified}=useAuthStore();
+  const[pin,setPin]=useState('');
+  const[confirmPin,setConfirmPin]=useState('');
+  const[step,setStep]=useState<'temporary'|'new'|'confirm'|'verify'>('verify');
+  const[loading,setLoading]=useState(false);
+  const[showLogoutModal,setShowLogoutModal]=useState(false);
 
-  const handlePinChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.replace(/[^0-9]/g, '');
-    if (value.length <= 6) step === 1 ? setPin(value) : setConfirmPin(value);
-  };
+  const forcedAgentChange=Boolean(user?.role==='agent'&&user?.mustChangePin);
+  const clientSetup=Boolean(user?.role==='client'&&!user?.pinHash);
 
-  const hashPin = async (value: string) => {
-    const encoded = new TextEncoder().encode(value);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
-    return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-  };
+  useEffect(()=>{
+    if(!user){navigate('/login');return;}
+    if(forcedAgentChange){setStep('temporary');return;}
+    if(user.role==='client'){setStep(clientSetup?'new':'verify');return;}
+    navigate(getHomeRouteByRole(user.role),{replace:true});
+  },[user,forcedAgentChange,clientSetup,navigate]);
 
-  const handleSetupPin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (pin.length < 4) return toast.error('Le PIN doit contenir entre 4 et 6 chiffres.');
-    if (step === 1) { setStep(2); return; }
-    if (pin !== confirmPin) { toast.error('Les PIN ne correspondent pas. Réessayez.'); setStep(1); setPin(''); setConfirmPin(''); return; }
+  const title=forcedAgentChange?'Sécuriser le compte':'Code PIN';
+  const subtitle=useMemo(()=>{
+    if(step==='temporary')return'Entrez le code temporaire 1234';
+    if(step==='new')return forcedAgentChange?'Créez votre nouveau code PIN':'Créez votre code PIN';
+    if(step==='confirm')return'Confirmez votre nouveau code';
+    return'Entrez votre code PIN';
+  },[step,forcedAgentChange]);
+
+  const currentValue=step==='confirm'?confirmPin:pin;
+  const setCurrent=(value:string)=>{const clean=value.replace(/\D/g,'').slice(0,6);step==='confirm'?setConfirmPin(clean):setPin(clean)};
+
+  const finishNewPin=async()=>{
+    if(!user)return;
+    if(pin.length<4)return toast.error('Le PIN doit contenir 4 à 6 chiffres.');
+    if(pin!==confirmPin){toast.error('Les codes ne correspondent pas.');setStep('new');setPin('');setConfirmPin('');return;}
+    if(forcedAgentChange&&pin==='1234'){toast.error('Choisissez un code différent du code temporaire.');setStep('new');setPin('');setConfirmPin('');return;}
     setLoading(true);
-    try {
-      if (user) {
-        const pinHash = await hashPin(pin);
-        await updateDoc(doc(db, 'users', user.uid), { pinHash });
-        setUser({ ...user, pinHash });
-        setPinVerified(true);
-        console.log('[PIN_CREATED]');
-        toast.success('PIN configuré avec succès !');
-        navigate('/client/home');
+    try{
+      const pinHash=await hashPin(pin);const now=Date.now();
+      if(forcedAgentChange){
+        await updateDoc(doc(db,'users',user.uid),{pinHash,temporaryPinHash:deleteField(),mustChangePin:false,pinChangedAt:now,updatedAt:now});
+        setUser({...user,pinHash,temporaryPinHash:undefined,mustChangePin:false,pinChangedAt:now,updatedAt:now});
+        setPinVerified(true);toast.success('Nouveau code enregistré.');navigate('/agent/terminal',{replace:true});
+      }else{
+        await updateDoc(doc(db,'users',user.uid),{pinHash,pinChangedAt:now,updatedAt:now});
+        setUser({...user,pinHash,pinChangedAt:now,updatedAt:now});setPinVerified(true);toast.success('PIN configuré.');navigate('/client/home',{replace:true});
       }
-    } catch (error) { console.log('[PIN_ERROR]', error); toast.error('Erreur lors de la configuration du PIN.'); }
-    finally { setLoading(false); }
+    }catch(error){console.error('[PIN_SAVE_ERROR]',error);toast.error('Impossible d’enregistrer le nouveau code.');}
+    finally{setLoading(false)}
   };
 
-  const handleVerifyPin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (pin.length < 4) return;
+  const submit=async(e:React.FormEvent)=>{
+    e.preventDefault();if(!user||currentValue.length<4)return;
+    if(step==='temporary'){
+      setLoading(true);
+      try{
+        const entered=await hashPin(pin);
+        const expected=user.temporaryPinHash||user.pinHash;
+        if(!expected||entered!==expected){toast.error('Code temporaire incorrect.');setPin('');return;}
+        setPin('');setStep('new');
+      }finally{setLoading(false)}
+      return;
+    }
+    if(step==='new'){setStep('confirm');return;}
+    if(step==='confirm'){await finishNewPin();return;}
     setLoading(true);
-    try {
-      const enteredHash = await hashPin(pin);
-      if (user?.pinHash === enteredHash) { setPinVerified(true); console.log('[PIN_VERIFIED]'); navigate('/client/home'); }
-      else { console.log('[PIN_ERROR]', 'Incorrect PIN'); toast.error('PIN incorrect.'); setPin(''); }
-    } catch (error) { console.log('[PIN_ERROR]', error); toast.error('Erreur lors de la vérification.'); }
-    finally { setLoading(false); }
+    try{
+      const entered=await hashPin(pin);
+      if(user.pinHash===entered){setPinVerified(true);navigate('/client/home',{replace:true})}
+      else{toast.error('PIN incorrect.');setPin('')}
+    }finally{setLoading(false)}
   };
 
-  return <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans text-slate-800"><div className="w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl border-4 border-slate-100/50 p-10 text-center"><h1 className="text-3xl font-black text-slate-800 tracking-tight mb-3">Code PIN</h1><p className="text-slate-500 mb-8 font-medium">{isSettingUp ? (step === 1 ? 'Créez votre code PIN (4-6 chiffres)' : 'Confirmez votre code PIN') : 'Entrez votre code PIN pour accéder à Market-Cash'}</p><form onSubmit={isSettingUp ? handleSetupPin : handleVerifyPin} className="space-y-6"><input type="password" inputMode="numeric" pattern="[0-9]*" value={step === 1 ? pin : confirmPin} onChange={handlePinChange} className="w-full text-center text-4xl font-black tracking-widest px-5 py-6 bg-slate-50 border-2 border-slate-100 rounded-[2rem] focus:border-blue-500 focus:bg-white focus:ring-0 outline-none transition-all text-slate-800" placeholder="••••" required/><button type="submit" disabled={loading || (step === 1 ? pin.length < 4 : confirmPin.length < 4)} className="w-full bg-blue-950 text-white py-4 rounded-2xl font-black tracking-wide hover:bg-blue-900 transition-colors disabled:opacity-50 shadow-lg shadow-blue-950/30">{loading ? 'TRAITEMENT...' : 'CONTINUER'}</button></form>{isSettingUp && step === 2 && <button onClick={() => { setStep(1); setPin(''); setConfirmPin(''); }} className="mt-6 text-sm font-bold text-slate-500 hover:text-slate-800 transition-colors">Recommencer</button>}<button onClick={() => setShowLogoutModal(true)} className="mt-8 text-sm font-bold text-red-500 hover:text-red-700 transition-colors uppercase tracking-widest">Déconnexion</button></div><LogoutModal isOpen={showLogoutModal} onClose={() => setShowLogoutModal(false)} /></div>;
+  return <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4"><div className="w-full max-w-sm rounded-[2rem] border bg-white p-7 text-center shadow-xl">
+    <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-blue-50 text-blue-950">{forcedAgentChange?<ShieldCheck/>:<KeyRound/>}</div>
+    <h1 className="mt-5 text-2xl font-black text-blue-950">{title}</h1><p className="mt-2 text-sm font-medium text-slate-500">{subtitle}</p>
+    {forcedAgentChange&&step==='temporary'&&<div className="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-black text-amber-900">Code provisoire : 1234</div>}
+    <form onSubmit={submit} className="mt-6 space-y-4"><input autoFocus type="password" inputMode="numeric" pattern="[0-9]*" value={currentValue} onChange={e=>setCurrent(e.target.value)} className="w-full rounded-2xl border-2 bg-slate-50 px-5 py-5 text-center text-3xl font-black tracking-[.35em] outline-none focus:border-blue-500 focus:bg-white" placeholder="••••"/><button type="submit" disabled={loading||currentValue.length<4} className="w-full rounded-2xl bg-blue-950 py-4 font-black text-white disabled:opacity-40">{loading?'Traitement…':step==='confirm'?'Enregistrer':'Continuer'}</button></form>
+    {(step==='confirm'||(step==='new'&&forcedAgentChange))&&<button onClick={()=>{setPin('');setConfirmPin('');setStep(forcedAgentChange?'temporary':'new')}} className="mt-4 text-xs font-black text-slate-500">Recommencer</button>}
+    <button onClick={()=>setShowLogoutModal(true)} className="mt-7 text-xs font-black uppercase tracking-wider text-red-500">Déconnexion</button>
+  </div><LogoutModal isOpen={showLogoutModal} onClose={()=>setShowLogoutModal(false)}/></div>;
 }
