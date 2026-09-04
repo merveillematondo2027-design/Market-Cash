@@ -1,5 +1,5 @@
 import React from 'react';
-import { Eye,EyeOff,RotateCcw,Wifi } from 'lucide-react';
+import {Eye,EyeOff,RotateCcw,Wifi} from 'lucide-react';
 
 export type CardProductVariant='local'|'standard'|'gold';
 
@@ -37,8 +37,8 @@ const shownDate=(value?:string,revealed=false)=>revealed&&value?value:'••/�
 const shownCvv=(value?:string,revealed=false)=>revealed&&/^\d{3,4}$/.test(String(value||''))?String(value):'•••';
 
 function Chip({className}:{className:string}){return <div className={`relative h-10 w-14 overflow-hidden rounded-[9px] border border-white/25 bg-gradient-to-br ${className} shadow-[inset_0_1px_1px_rgba(255,255,255,.65),0_4px_10px_rgba(0,0,0,.18)]`}><span className="absolute inset-y-0 left-[38%] w-px bg-black/20"/><span className="absolute inset-y-0 left-[68%] w-px bg-black/15"/><span className="absolute inset-x-0 top-1/2 h-px bg-black/20"/><span className="absolute left-[38%] top-1/2 h-[35%] w-[30%] border-b border-r border-black/15"/></div>}
-
 function Brand({variant}:{variant:CardProductVariant}){return <div><div className="text-[15px] font-black tracking-[.035em] sm:text-[17px]"><span>MARKET</span><span className={variant==='standard'?'text-slate-100':variant==='gold'?'text-[#e9bd57]':'text-[#ffd54a]'}>-CASH</span></div><div className="mt-1 h-[2px] w-9 rounded-full bg-white/50"/></div>}
+function DateCell({label,value,muted,revealed}:{label:string;value?:string;muted:string;revealed:boolean}){return <div className="shrink-0"><p className={`text-[5.5px] font-black uppercase tracking-[.12em] ${muted}`}>{label}</p><p className="mt-1 font-mono text-[9px] font-black">{shownDate(value,revealed)}</p></div>}
 
 export default function CardProductFace({variant,holder,number,expiryStart,expiryEnd,cvv,revealed=false,side='front',showRevealButton=true,onToggleReveal,onFlip,className=''}:CardProductFaceProps){
   const style=cfg[variant];
@@ -60,23 +60,16 @@ export default function CardProductFace({variant,holder,number,expiryStart,expir
 
       {standardBack?<>
         <div className="-mx-5 mt-5 h-12 bg-black/85 shadow-inner"/>
-        <div className="mt-4 flex items-center gap-3">
-          <div className="h-10 flex-1 rounded-md bg-gradient-to-r from-slate-100 via-white to-slate-200 p-2 text-right font-mono text-[9px] italic tracking-[.14em] text-slate-500">SIGNATURE AUTORISÉE</div>
-          <div className="rounded-lg bg-white px-3 py-2 text-center text-slate-950"><p className="text-[7px] font-black uppercase text-slate-400">CVV</p><p className="font-mono text-sm font-black tracking-[.2em]">{shownCvv(cvv,revealed)}</p></div>
-        </div>
+        <div className="mt-4 flex items-center gap-3"><div className="h-10 flex-1 rounded-md bg-gradient-to-r from-slate-100 via-white to-slate-200 p-2 text-right font-mono text-[9px] italic tracking-[.14em] text-slate-500">SIGNATURE AUTORISÉE</div><div className="rounded-lg bg-white px-3 py-2 text-center text-slate-950"><p className="text-[7px] font-black uppercase text-slate-400">CVV</p><p className="font-mono text-sm font-black tracking-[.2em]">{shownCvv(cvv,revealed)}</p></div></div>
         <div className="mt-auto flex items-end justify-between"><p className="max-w-[70%] text-[7px] leading-3 text-slate-300">Cette carte reste la propriété de Market-Cash. En cas de perte, bloquez-la depuis votre application.</p><p className="text-xl font-black italic tracking-[-.08em]">VISA</p></div>
       </>:<>
-        <div className="mt-5 flex items-center justify-between">
-          <div className="flex items-center gap-3"><Chip className={style.chip}/><Wifi size={24} className="rotate-90 text-white/90" strokeWidth={2.4}/></div>
-          <div className={`text-right ${style.accent}`}><div className="text-[7px] font-black uppercase tracking-[.16em] opacity-80">{variant==='local'?'Market-Cash':'Worldwide'}</div><div className="mt-1 text-sm font-black italic">{style.network}</div></div>
-        </div>
-        <div className="my-auto py-3">
-          <p className="whitespace-nowrap font-mono text-[1.08rem] font-semibold tracking-[.145em] drop-shadow sm:text-[1.32rem]">{formatNumber(number,revealed)}</p>
-        </div>
-        <div className="grid grid-cols-[1fr_auto_auto] items-end gap-3">
-          <div className="min-w-0"><p className={`text-[6px] font-black uppercase tracking-[.18em] ${style.muted}`}>Titulaire</p><p className="mt-1 truncate text-[10px] font-black tracking-[.04em] sm:text-[11px]">{shownHolder(holder,revealed)}</p></div>
-          {variant==='standard'?<div className="flex gap-3"><div><p className={`text-[6px] font-black uppercase tracking-[.14em] ${style.muted}`}>Du</p><p className="mt-1 font-mono text-[10px] font-black">{shownDate(expiryStart,revealed)}</p></div><div><p className={`text-[6px] font-black uppercase tracking-[.14em] ${style.muted}`}>Expire</p><p className="mt-1 font-mono text-[10px] font-black">{shownDate(expiryEnd,revealed)}</p></div></div>:<div><p className={`text-[6px] font-black uppercase tracking-[.14em] ${style.muted}`}>Expire</p><p className="mt-1 font-mono text-[10px] font-black">{shownDate(expiryEnd,revealed)}</p></div>}
-          {variant!=='standard'&&<div><p className={`text-[6px] font-black uppercase tracking-[.14em] ${style.muted}`}>CVV</p><p className="mt-1 font-mono text-[10px] font-black tracking-[.16em]">{shownCvv(cvv,revealed)}</p></div>}
+        <div className="mt-4 flex items-center justify-between"><div className="flex items-center gap-3"><Chip className={style.chip}/><Wifi size={24} className="rotate-90 text-white/90" strokeWidth={2.4}/></div><div className={`text-right ${style.accent}`}><div className="text-[7px] font-black uppercase tracking-[.16em] opacity-80">{variant==='local'?'Market-Cash':'Worldwide'}</div><div className="mt-1 text-sm font-black italic">{style.network}</div></div></div>
+        <div className="my-auto py-2"><p className="whitespace-nowrap font-mono text-[1.03rem] font-semibold tracking-[.13em] drop-shadow sm:text-[1.28rem]">{formatNumber(number,revealed)}</p></div>
+        <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-end gap-2 sm:gap-3">
+          <div className="min-w-0"><p className={`text-[5.5px] font-black uppercase tracking-[.16em] ${style.muted}`}>Titulaire</p><p className="mt-1 truncate text-[9px] font-black tracking-[.03em] sm:text-[10px]">{shownHolder(holder,revealed)}</p></div>
+          <DateCell label="Début" value={expiryStart} muted={style.muted} revealed={revealed}/>
+          <DateCell label="Fin" value={expiryEnd} muted={style.muted} revealed={revealed}/>
+          {variant==='standard'?<div/>:<div className="shrink-0"><p className={`text-[5.5px] font-black uppercase tracking-[.12em] ${style.muted}`}>CVV</p><p className="mt-1 font-mono text-[9px] font-black tracking-[.12em]">{shownCvv(cvv,revealed)}</p></div>}
         </div>
       </>}
     </div>
