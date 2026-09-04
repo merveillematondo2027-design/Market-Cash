@@ -45,3 +45,4 @@ export * from './localCardExplicit';
 export * from './security';
 export * from './identityV2';
 export * from './cardProvisioningV2';
+export * from './visaSecurity';
