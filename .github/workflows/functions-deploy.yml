@@ -81,16 +81,29 @@ jobs:
           cat /tmp/market-cash-functions.txt
           test -s /tmp/market-cash-functions.txt
 
-      - name: Deploy Cloud Functions sequentially
+      - name: Deploy Cloud Functions sequentially with retry
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           while IFS= read -r fn; do
             [ -z "$fn" ] && continue
-            echo "Deploying functions:${fn}"
-            firebase deploy \
-              --only "functions:${fn}" \
-              --project automarket-fintech \
-              --non-interactive
-            sleep 12
+            success=0
+            for attempt in 1 2 3; do
+              echo "Deploying functions:${fn} (attempt ${attempt}/3)"
+              if firebase deploy \
+                --only "functions:${fn}" \
+                --project automarket-fintech \
+                --non-interactive; then
+                success=1
+                break
+              fi
+              wait_seconds=$((attempt * 30))
+              echo "Transient deployment failure for ${fn}; retrying in ${wait_seconds}s..."
+              sleep "$wait_seconds"
+            done
+            if [ "$success" -ne 1 ]; then
+              echo "Function ${fn} failed after 3 attempts."
+              exit 1
+            fi
+            sleep 10
           done < /tmp/market-cash-functions.txt

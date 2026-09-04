@@ -40,6 +40,7 @@ export interface WalletServerSnapshot {
     status: string;
     rechargeNumber: string;
     marketCashId?: string;
+    updatedAt?: number;
   }>;
 }
 
@@ -96,6 +97,7 @@ const call = <TReq,TRes>(name:string) => httpsCallable<TReq,TRes>(functions,name
 export const agentWalletService = {
   ensureWalletProfile: async() => (await call<Record<string,never>,WalletServerSnapshot & {ok:boolean}>('ensureWalletProfile')({})).data,
   getMyWallets: async() => (await call<Record<string,never>,WalletServerSnapshot>('getMyWallets')({})).data,
+  getMyAgentAccountSnapshot: async() => (await call<Record<string,never>,WalletServerSnapshot>('getMyAgentAccountSnapshot')({})).data,
   getMyMarketCashIdentity: async() => (await call<Record<string,never>,MarketCashIdentity>('getMyMarketCashIdentity')({})).data,
 
   lookupMarketCashRecipient: async(marketCashId:string) => (await call<{marketCashId:string},MarketCashRecipient>('lookupMarketCashRecipient')({marketCashId})).data,

@@ -41,6 +41,7 @@ import BusinessHistory from'./pages/business/BusinessHistory';
 import AdminDashboard from'./pages/admin/Dashboard';
 import AdminUsers from'./pages/admin/Users';
 import AdminAgents from'./pages/admin/AdminAgents';
+import AdminAgentDetails from'./pages/admin/AdminAgentDetails';
 import AccountRequests from'./pages/admin/AccountRequests';
 import AdminStock from'./pages/admin/AdminStock';
 import AdminRequests from'./pages/admin/Requests';
@@ -171,6 +172,7 @@ export default function App(){
         <Route path="notifications" element={<AdminNotifications/>}/>
         <Route path="profile" element={<AdminProfile/>}/>
         <Route path="agents" element={<AdminGeneralOnly><AdminAgents/></AdminGeneralOnly>}/>
+        <Route path="agents/:agentUid" element={<AdminGeneralOnly><AdminAgentDetails/></AdminGeneralOnly>}/>
         <Route path="stock" element={<AdminGeneralOnly><AdminStock/></AdminGeneralOnly>}/>
         <Route path="library" element={<AdminGeneralOnly><CardLibrary/></AdminGeneralOnly>}/>
         <Route path="requests" element={<AdminGeneralOnly><AdminRequests/></AdminGeneralOnly>}/>

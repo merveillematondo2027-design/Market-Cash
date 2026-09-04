@@ -77,6 +77,8 @@ async function readWallets(agentUid:string){
     const data=snap.data();
     result[currency]=data?{
       id:snap.id,
+      userId:String(data.userId||agentUid),
+      accountType:String(data.accountType||'agent'),
       currency,
       status:String(data.status||'active'),
       availableBalance:Number(data.availableBalance||0),
@@ -89,6 +91,17 @@ async function readWallets(agentUid:string){
   }
   return result;
 }
+
+export const getMyAgentAccountSnapshot=onCall({region:REGION},async request=>{
+  const agentUid=requireAuth(request);
+  await requireActiveAgent(agentUid);
+  const identity=await ensureAgentWallets(agentUid);
+  return{
+    ...identity,
+    isAgent:true,
+    wallets:await readWallets(agentUid),
+  };
+});
 
 export const adminGetAgentDetails=onCall({region:REGION},async request=>{
   const adminUid=requireAuth(request);
