@@ -15,9 +15,16 @@ service cloud.firestore {
     function isLivreur(){ return isSignedIn() && (isAdminGeneral() || getUserRole() == 'livreur'); }
     function isStaff(){ return isOperationsAdmin() || isChefAgence() || isDesignerGraphique() || isLivreur(); }
     function ownerUserUpdateIsSafe(){
-      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-        'displayName','phone','avatar','pinHash','useBiometrics','updatedAt'
-      ]);
+      let changed=request.resource.data.diff(resource.data).affectedKeys();
+      return changed.hasOnly([
+        'displayName','phone','avatar','pinHash','pinChangedAt','useBiometrics','updatedAt'
+      ]) || (
+        changed.hasOnly(['pinHash','temporaryPinHash','mustChangePin','pinChangedAt','useBiometrics','updatedAt'])
+        && request.resource.data.pinHash is string
+        && request.resource.data.pinHash.size() == 64
+        && request.resource.data.mustChangePin == false
+        && !request.resource.data.keys().hasAny(['temporaryPinHash'])
+      );
     }
     function operationsUserUpdateIsSafe(){
       let changed=request.resource.data.diff(resource.data).affectedKeys();
@@ -28,6 +35,14 @@ service cloud.firestore {
         changed.hasOnly(['role','updatedAt'])
         && resource.data.role == 'client'
         && request.resource.data.role in ['client','agent','marchand']
+      ) || (
+        changed.hasOnly(['role','pinHash','temporaryPinHash','mustChangePin','pinChangedAt','updatedAt'])
+        && resource.data.role == 'client'
+        && request.resource.data.role == 'agent'
+        && request.resource.data.pinHash == ''
+        && request.resource.data.temporaryPinHash is string
+        && request.resource.data.temporaryPinHash.size() == 64
+        && request.resource.data.mustChangePin == true
       );
     }
     function ownerKycUpdateIsSafe(){
