@@ -54,7 +54,7 @@ export default function MerchantPay() {
       setMerchant(result);
       setStep('review');
     } catch (error: any) {
-      toast.error(error?.message || 'Marchand introuvable ou non autorisé. Vérifiez son ID Market-Cash.');
+      toast.error(error?.message || 'Marchand introuvable ou non autorisé. Vérifiez son ID MCM.');
     } finally {
       setBusy(false);
     }
@@ -86,7 +86,7 @@ export default function MerchantPay() {
 
   return (
     <div className="mx-auto max-w-xl p-4 pb-28 md:p-8">
-      <Link to="/client/home" className="inline-flex items-center gap-2 text-sm font-bold text-slate-500"><ArrowLeft size={16} /> Retour à l'accueil</Link>
+      <Link to="/client/cards/local" className="inline-flex items-center gap-2 text-sm font-bold text-slate-500"><ArrowLeft size={16} /> Retour à la carte locale</Link>
       <section className="mt-5 rounded-3xl border bg-white p-5 shadow-sm md:p-6">
         <div className="grid h-12 w-12 place-items-center rounded-2xl bg-amber-50 text-amber-700"><Store /></div>
         <h1 className="mt-4 text-2xl font-black text-slate-950">Payer un marchand</h1>
@@ -116,8 +116,8 @@ export default function MerchantPay() {
             </div>
 
             {step === 'form' && <div className="mt-5 space-y-3">
-              <label className="block text-xs font-black uppercase text-slate-500">ID Market-Cash du marchand</label>
-              <input value={merchantId} onChange={event => setMerchantId(event.target.value.toUpperCase())} placeholder="MCW-XXXXXXXXXX" className="w-full rounded-2xl border p-4 font-mono" />
+              <label className="block text-xs font-black uppercase text-slate-500">ID MCM du marchand</label>
+              <input value={merchantId} onChange={event => setMerchantId(event.target.value.toUpperCase())} placeholder="MCM-1234567890A" className="w-full rounded-2xl border p-4 font-mono" />
               <label className="block text-xs font-black uppercase text-slate-500">Montant</label>
               <input value={amount} onChange={event => setAmount(event.target.value)} inputMode="decimal" placeholder={`Montant en ${currency}`} className="w-full rounded-2xl border p-4" />
               {value > cardBalance && <p className="text-xs font-bold text-red-600">Solde de la carte locale insuffisant. Rechargez d’abord la carte depuis le portefeuille principal.</p>}
