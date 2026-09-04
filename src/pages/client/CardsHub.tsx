@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, CreditCard, QrCode, RefreshCw, ShieldCheck, Store, WalletCards } from 'lucide-react';
+import { ArrowLeft, CreditCard, Plus, QrCode, RefreshCw, ShieldCheck, Store, WalletCards } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
+import toast from 'react-hot-toast';
 import ClientCards from './Cards';
 import { agentWalletService, InternalCardSummary } from '../../services/agentWalletService';
 
@@ -14,21 +15,38 @@ export default function CardsHub() {
   const visaMode = searchParams.get('visa') === 'buy';
   const [localCard, setLocalCard] = useState<InternalCardSummary | null>(null);
   const [loadingLocal, setLoadingLocal] = useState(true);
+  const [activatingLocal, setActivatingLocal] = useState(false);
   const [localError, setLocalError] = useState('');
 
   const loadLocalCard = async () => {
     setLoadingLocal(true);
     setLocalError('');
     try {
-      await agentWalletService.ensureLocalCard();
       const cards = await agentWalletService.getMyInternalCards();
       setLocalCard(cards[0] || null);
     } catch (error: any) {
       console.error('[LOCAL_CARD_LOAD_ERROR]', error);
       setLocalCard(null);
-      setLocalError(error?.message || 'Impossible de charger la carte locale pour le moment.');
+      setLocalError(error?.message || 'Impossible de vérifier la carte locale pour le moment.');
     } finally {
       setLoadingLocal(false);
+    }
+  };
+
+  const activateLocalCard = async () => {
+    setActivatingLocal(true);
+    setLocalError('');
+    try {
+      await agentWalletService.ensureLocalCard();
+      const cards = await agentWalletService.getMyInternalCards();
+      setLocalCard(cards[0] || null);
+      toast.success('Votre carte locale Market-Cash est prête.');
+    } catch (error: any) {
+      console.error('[LOCAL_CARD_ACTIVATION_ERROR]', error);
+      setLocalError(error?.message || 'Impossible d’obtenir la carte locale pour le moment.');
+      toast.error(error?.message || 'Activation de la carte locale impossible.');
+    } finally {
+      setActivatingLocal(false);
     }
   };
 
@@ -47,7 +65,7 @@ export default function CardsHub() {
             <p className="text-[10px] font-black uppercase tracking-[.18em] text-blue-700">Produit international séparé</p>
             <h1 className="mt-1 text-2xl font-black text-slate-950">Acheter une carte Visa</h1>
             <p className="mt-2 text-xs leading-5 text-slate-600">
-              Cet espace sert uniquement aux demandes d'achat Visa. La Visa n'est pas utilisée pour les retraits et paiements locaux Market-Cash.
+              Cet espace sert uniquement aux demandes d'achat Visa. Aucune Visa n'est créée automatiquement et la Visa n'est pas utilisée pour les retraits ou paiements locaux Market-Cash.
             </p>
           </div>
         </section>
@@ -62,19 +80,19 @@ export default function CardsHub() {
         <div className="mb-4 flex items-end justify-between gap-3">
           <div>
             <p className="text-[11px] font-black uppercase tracking-[.18em] text-emerald-700">Paiements locaux Market-Cash</p>
-            <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-950">Ma carte locale</h1>
+            <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-950">Carte locale Market-Cash</h1>
             <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">
-              Cette carte est attribuée automatiquement à votre compte. Retraits chez les Agents et paiements marchands sont débités ici, jamais directement du portefeuille principal.
+              La carte locale n'est plus attribuée automatiquement. Votre espace reste vide tant que vous ne choisissez pas d'obtenir votre carte locale.
             </p>
           </div>
-          <span className="hidden rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase text-emerald-700 sm:inline-flex">1 carte locale / compte</span>
+          <span className="hidden rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase text-emerald-700 sm:inline-flex">1 carte locale maximum</span>
         </div>
 
         {loadingLocal ? (
           <div className="grid min-h-48 place-items-center rounded-3xl border bg-white shadow-sm">
-            <div className="flex items-center gap-2 text-sm font-bold text-slate-500"><RefreshCw className="animate-spin" size={18} /> Création / chargement de la carte locale…</div>
+            <div className="flex items-center gap-2 text-sm font-bold text-slate-500"><RefreshCw className="animate-spin" size={18} /> Vérification de votre espace cartes…</div>
           </div>
-        ) : localError ? (
+        ) : localError && !localCard ? (
           <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5">
             <p className="font-black text-amber-900">Carte locale momentanément indisponible</p>
             <p className="mt-1 text-xs leading-5 text-amber-800">{localError}</p>
@@ -119,10 +137,28 @@ export default function CardsHub() {
               <Link to="/client/wallet/withdraw" className="flex items-center justify-between rounded-2xl border bg-white p-4 text-sm font-black text-blue-950"><span className="flex items-center gap-2"><ShieldCheck size={18} /> Retrait chez Agent</span><span>→</span></Link>
             </div>
           </div>
-        ) : null}
+        ) : (
+          <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-7 text-center shadow-sm sm:p-10">
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-blue-50 text-blue-800"><WalletCards size={30} /></div>
+            <p className="mt-4 text-[10px] font-black uppercase tracking-[.18em] text-slate-400">Aucune carte locale attribuée</p>
+            <h2 className="mt-1 text-xl font-black text-slate-950">Votre espace carte locale est vide</h2>
+            <p className="mx-auto mt-2 max-w-md text-xs leading-5 text-slate-500">
+              Obtenez une carte locale Market-Cash uniquement quand vous êtes prêt à l'utiliser. Elle servira ensuite pour les paiements marchands et les retraits chez Agent.
+            </p>
+            <button
+              type="button"
+              disabled={activatingLocal}
+              onClick={() => void activateLocalCard()}
+              className="mx-auto mt-5 flex items-center justify-center gap-2 rounded-2xl bg-blue-950 px-6 py-4 text-sm font-black text-white shadow-sm disabled:opacity-50"
+            >
+              {activatingLocal ? <RefreshCw className="animate-spin" size={18} /> : <Plus size={18} />}
+              {activatingLocal ? 'Création en cours…' : 'Obtenir ma carte locale'}
+            </button>
+          </div>
+        )}
 
         <div className="mt-8 rounded-3xl border border-blue-100 bg-blue-50 p-4 text-xs leading-5 text-blue-950">
-          <b>Flux retenu :</b> dépôt → portefeuille principal → recharge de la carte locale → paiement ou retrait. La carte Visa reste un produit séparé et n’est pas utilisée pour les opérations locales.
+          <b>Flux retenu :</b> dépôt → portefeuille principal → recharge de la carte locale → paiement ou retrait. Sans carte locale activée, aucune dépense locale n'est possible. La Visa reste totalement séparée.
         </div>
 
         <div className="mt-10 border-t pt-8">
@@ -130,11 +166,11 @@ export default function CardsHub() {
             <div className="flex items-start gap-3">
               <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-slate-100 text-blue-950"><CreditCard size={23} /></div>
               <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-black uppercase tracking-[.16em] text-slate-400">Produit séparé</p>
+                <p className="text-[10px] font-black uppercase tracking-[.16em] text-slate-400">Produit international séparé</p>
                 <h2 className="mt-1 text-xl font-black text-slate-950">Carte Visa</h2>
-                <p className="mt-1 text-xs leading-5 text-slate-500">Aucune Visa n'est attribuée automatiquement. Le client peut uniquement lancer une demande d'achat.</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">Aucune Visa n'est attribuée automatiquement. Le client peut uniquement lancer une demande d'achat Visa.</p>
                 <div className="mt-4 rounded-2xl bg-slate-50 p-3 text-xs text-slate-600">
-                  <b>État actuel :</b> 0 Visa attribuée automatiquement. Les anciennes cartes de test ont été retirées du parcours client.
+                  <b>État attendu :</b> aucune Visa tant qu'une demande d'achat n'a pas été approuvée et qu'une carte n'a pas été attribuée.
                 </div>
                 <Link to="/client/cards?visa=buy" className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-4 text-sm font-black text-white shadow-sm sm:w-auto">
                   <CreditCard size={18} /> Acheter une carte Visa
