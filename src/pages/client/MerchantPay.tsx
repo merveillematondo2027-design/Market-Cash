@@ -42,9 +42,8 @@ export default function MerchantPay() {
   }, []);
 
   const selectedCard = cards.find(card => card.cardId === selectedCardId) || null;
-  const cardBalance = Number(selectedCard?.balances?.[currency] || 0);
   const value = useMemo(() => Number(String(amount).replace(',', '.')), [amount]);
-  const valid = Number.isFinite(value) && value > 0 && value <= cardBalance;
+  const valid = Number.isFinite(value) && value > 0;
 
   const identify = async () => {
     if (!merchantId.trim() || !valid || !selectedCard) return;
@@ -78,7 +77,7 @@ export default function MerchantPay() {
       toast.success('Paiement par carte locale confirmé.');
       await refreshCards();
     } catch (error: any) {
-      toast.error(error?.message || 'Paiement refusé.');
+      toast.error(error?.message || 'Paiement refusé. Vérifiez le solde de la carte locale.');
     } finally {
       setBusy(false);
     }
@@ -110,9 +109,9 @@ export default function MerchantPay() {
                   {cards.map(card => <option key={card.cardId} value={card.cardId}>{card.maskedNumber} · {card.cardIdentifier}</option>)}
                 </select>
               ) : (
-                <div className="mt-3 flex items-center justify-between gap-3"><div><p className="font-mono text-sm font-black">{selectedCard?.maskedNumber}</p><p className="mt-1 font-mono text-[10px] text-slate-500">{selectedCard?.cardIdentifier}</p></div><div className="text-right"><p className="text-[10px] font-black uppercase text-slate-400">Solde {currency}</p><p className="font-black">{fmt(cardBalance, currency)}</p></div></div>
+                <div className="mt-3 flex items-center justify-between gap-3"><div><p className="font-mono text-sm font-black">{selectedCard?.maskedNumber}</p><p className="mt-1 font-mono text-[10px] text-slate-500">{selectedCard?.cardIdentifier}</p></div><div className="text-right"><p className="text-[10px] font-black uppercase text-slate-400">Solde {currency}</p><p className="font-black tracking-widest">••••••</p></div></div>
               )}
-              {cards.length > 1 && <p className="mt-2 text-right text-sm font-black">Solde : {fmt(cardBalance, currency)}</p>}
+              <p className="mt-2 text-[10px] font-bold text-slate-500">Le solde reste masqué ici. Utilisez l’œil dans l’espace de la carte locale pour le consulter après code secret.</p>
             </div>
 
             {step === 'form' && <div className="mt-5 space-y-3">
@@ -120,7 +119,7 @@ export default function MerchantPay() {
               <input value={merchantId} onChange={event => setMerchantId(event.target.value.toUpperCase())} placeholder="MCM-1234567890A" className="w-full rounded-2xl border p-4 font-mono" />
               <label className="block text-xs font-black uppercase text-slate-500">Montant</label>
               <input value={amount} onChange={event => setAmount(event.target.value)} inputMode="decimal" placeholder={`Montant en ${currency}`} className="w-full rounded-2xl border p-4" />
-              {value > cardBalance && <p className="text-xs font-bold text-red-600">Solde de la carte locale insuffisant. Rechargez d’abord la carte depuis le portefeuille principal.</p>}
+              <p className="text-xs text-slate-500">Le serveur vérifiera le solde réel de la carte au moment de la confirmation.</p>
               <button disabled={busy || !merchantId.trim() || !valid || !selectedCard} onClick={identify} className="w-full rounded-2xl bg-blue-950 py-4 font-black text-white disabled:opacity-40">{busy ? 'Vérification…' : 'Vérifier le marchand'}</button>
             </div>}
 
