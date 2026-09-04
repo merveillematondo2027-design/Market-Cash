@@ -80,59 +80,36 @@ jobs:
           echo 'Changed function sources:'
           printf '%s\n' "${function_changes[@]:-}"
 
-          coherence_set=0
+          priority_set=0
           if [ "${#function_changes[@]}" -eq 0 ]; then
-            # A workflow-only deployment commit is used to supersede a stale
-            # deployment. Deploy the complete card/security coherence set.
-            coherence_set=1
+            # Workflow-only commits are used to supersede a failed/stale deploy.
+            # Redeploy the smallest critical set first.
+            priority_set=1
           else
-            coherence_set=1
+            priority_set=1
             for file in "${function_changes[@]}"; do
               case "$file" in
-                functions/src/security.ts|functions/src/identityV2.ts|functions/src/cardProvisioningV2.ts|functions/src/visaSecurity.ts|functions/src/entry.ts|functions/src/localCard.ts|functions/src/localCardExplicit.ts) ;;
-                *) coherence_set=0 ;;
+                functions/src/cardProvisioningV2.ts|functions/src/security.ts|functions/src/entry.ts) ;;
+                *) priority_set=0 ;;
               esac
             done
           fi
 
-          if [ "$coherence_set" -eq 1 ]; then
+          if [ "$priority_set" -eq 1 ]; then
             cat > /tmp/market-cash-functions.txt <<'EOF'
           verifyApplicationSecret
+          changeApplicationPin
+          activateLocalMarketCashCardV2
+          getMyLocalMarketCashCardsV3
           syncLocalCardSecurityProfile
           getClientSecurityOverview
           revealLocalCardSecureData
           rotateMarketCashLocalCvv
-          changeApplicationPin
-          walletToLocalCardWithCvv
-          marketCashTransferWithCvv
-          merchantPaymentFromLocalCardWithCvv
-          agentLocalCardCashOutWithCvv
-          ensureWalletProfileV2
-          getMyWalletsV2
-          getMyMarketCashIdentityV2
-          lookupMarketCashRecipientV2
-          lookupMerchantRecipientV2
-          lookupAgentClientByMarketCashIdV2
-          agentCashInByMarketCashIdV2
-          merchantPaymentFromLocalCardWithCvvV2
+          onKycRequestApproved
           onClientKycApproved
-          activateLocalMarketCashCardV2
-          getMyLocalMarketCashCardsV3
-          getMyVisaCardSummaries
-          revealVisaCardSecureData
-          lookupLocalMarketCashCardForWithdrawal
-          merchantPayment
-          createWithdrawalAuthorization
-          redeemWithdrawalAuthorization
-          agentCashOut
-          walletToInternalCard
-          agentCardCashOut
-          marketCashTransfer
-          walletToLocalMarketCashCardV2
-          merchantPaymentFromLocalCardV2
-          agentLocalCardCashOut
           EOF
-            echo 'Card/security coherence change detected: deploying the critical production set.'
+            echo 'Priority security/KYC deployment selected.'
+            echo '1' > /tmp/market-cash-batch-size.txt
           else
             node <<'NODE' > /tmp/market-cash-functions.txt
           const mod = require('./functions/lib/entry.js');
@@ -140,20 +117,21 @@ jobs:
             if (typeof value === 'function' && value.__endpoint) console.log(name);
           }
           NODE
+            sort -u /tmp/market-cash-functions.txt -o /tmp/market-cash-functions.txt
             echo 'General Functions change detected: full export set selected.'
+            echo '2' > /tmp/market-cash-batch-size.txt
           fi
 
-          sort -u /tmp/market-cash-functions.txt -o /tmp/market-cash-functions.txt
           echo 'Functions selected:'
           cat /tmp/market-cash-functions.txt
           test -s /tmp/market-cash-functions.txt
 
-      - name: Deploy Cloud Functions in small batches with retry
+      - name: Deploy Cloud Functions conservatively with retry
         shell: bash
         run: |
           set -uo pipefail
           mapfile -t functions_to_deploy < /tmp/market-cash-functions.txt
-          batch_size=4
+          batch_size="$(cat /tmp/market-cash-batch-size.txt)"
 
           for ((i=0; i<${#functions_to_deploy[@]}; i+=batch_size)); do
             only=''
@@ -172,19 +150,19 @@ jobs:
             [ -z "$only" ] && continue
             success=0
             for attempt in 1 2 3; do
-              echo "Deploying batch: ${batch[*]} (attempt ${attempt}/3)"
+              echo "Deploying: ${batch[*]} (attempt ${attempt}/3)"
               if firebase deploy --only "$only" --project automarket-fintech --non-interactive; then
                 success=1
                 break
               fi
-              wait_seconds=$((attempt * 30))
-              echo "Transient deployment failure; retrying batch in ${wait_seconds}s..."
+              wait_seconds=$((attempt * 35))
+              echo "Deployment failure; retrying in ${wait_seconds}s..."
               sleep "$wait_seconds"
             done
 
             if [ "$success" -ne 1 ]; then
-              echo "Batch failed after 3 attempts: ${batch[*]}"
+              echo "Deployment failed after 3 attempts: ${batch[*]}"
               exit 1
             fi
-            sleep 8
+            sleep 12
           done
