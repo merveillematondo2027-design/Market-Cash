@@ -18,3 +18,4 @@ export * from './cardProducts';
 export * from './agentIdentityV2';
 export * from './merchantLookupV2';
 export * from './adminIdentity';
+export * from './cardSummarySecure';
