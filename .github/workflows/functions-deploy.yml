@@ -107,8 +107,12 @@ jobs:
           getClientSecurityOverview
           revealLocalCardSecureData
           rotateMarketCashLocalCvv
+          walletToLocalCardWithCvv
+          marketCashTransferWithCvv
+          merchantPaymentFromLocalCardWithCvv
+          agentLocalCardCashOutWithCvv
           EOF
-            echo 'Priority callable security/KYC recovery deployment selected.'
+            echo 'Priority callable security/KYC and secure transaction deployment selected.'
             echo '1' > /tmp/market-cash-batch-size.txt
           else
             node <<'NODE' > /tmp/market-cash-functions.txt
