@@ -35,8 +35,7 @@ export default function MerchantPay() {
   };
 
   useEffect(() => {
-    agentWalletService.ensureLocalCard()
-      .then(() => refreshCards())
+    refreshCards()
       .catch(() => setCards([]))
       .finally(() => setLoadingCards(false));
   }, []);
@@ -98,7 +97,7 @@ export default function MerchantPay() {
           <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-center text-sm font-bold text-slate-500">Chargement de la carte locale…</div>
         ) : cards.length === 0 ? (
           <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            <b>Aucune carte locale disponible.</b> Ouvrez l’espace Cartes pour initialiser votre carte Market-Cash.
+            <b>Aucune carte locale disponible.</b> Ouvrez l’espace Cartes puis choisissez « Obtenir ma carte locale » avant d’effectuer un paiement.
             <Link to="/client/cards" className="mt-3 block rounded-xl bg-blue-950 px-4 py-3 text-center font-black text-white">Ouvrir Mes cartes</Link>
           </div>
         ) : (
