@@ -13,6 +13,9 @@ export interface User {
   agencyId?: string;
   agencyName?: string;
   pinHash: string;
+  temporaryPinHash?: string;
+  mustChangePin?: boolean;
+  pinChangedAt?: number;
   useBiometrics?: boolean;
   kycStatus?: KycStatus;
   accountStatus?: AccountStatus;
