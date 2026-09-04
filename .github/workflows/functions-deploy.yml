@@ -78,6 +78,7 @@ jobs:
 
           # Targeted deploys avoid redeploying the complete historical function
           # set when only the local-card rail or legacy spending guards changed.
+          explicit_local_card_only=0
           local_card_only=0
           legacy_spending_guard_only=0
           if git rev-parse HEAD^ >/dev/null 2>&1; then
@@ -90,6 +91,16 @@ jobs:
               && grep -q 'LEGACY_LOCAL_CARD_SPENDING_GUARD' functions/src/entry.ts; then
               legacy_spending_guard_only=1
             fi
+
+            explicit_local_card_only=1
+            for file in "${function_changes[@]}"; do
+              case "$file" in
+                functions/src/localCardExplicit.ts|functions/src/entry.ts) ;;
+                *) explicit_local_card_only=0 ;;
+              esac
+            done
+            [ "${#function_changes[@]}" -gt 0 ] || explicit_local_card_only=0
+            printf '%s\n' "${function_changes[@]}" | grep -qx 'functions/src/localCardExplicit.ts' || explicit_local_card_only=0
 
             local_card_only=1
             for file in "${function_changes[@]}"; do
@@ -112,6 +123,14 @@ jobs:
           agentCardCashOut
           EOF
             echo 'Legacy spending guard change detected: deploying only blocked legacy endpoints.'
+          elif [ "$explicit_local_card_only" -eq 1 ]; then
+            cat > /tmp/market-cash-functions.txt <<'EOF'
+          activateLocalMarketCashCard
+          getMyLocalMarketCashCardsV2
+          walletToLocalMarketCashCardV2
+          merchantPaymentFromLocalCardV2
+          EOF
+            echo 'Explicit local-card change detected: deploying only the V2 local-card endpoints.'
           elif [ "$local_card_only" -eq 1 ]; then
             cat > /tmp/market-cash-functions.txt <<'EOF'
           ensureLocalMarketCashCard
