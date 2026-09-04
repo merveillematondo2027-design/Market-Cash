@@ -1,0 +1,131 @@
+name: Market-Cash Visa Test Reset
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/visa-test-reset.yml'
+  workflow_dispatch:
+
+jobs:
+  reset-visa-test-data:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/153173040202/locations/global/workloadIdentityPools/github-actions/providers/market-cash'
+          service_account: 'market-cash-github-deployer@automarket-fintech.iam.gserviceaccount.com'
+
+      - name: Install Firestore admin client
+        run: npm install --no-save --no-package-lock --no-audit --no-fund firebase-admin@13
+
+      - name: Reset legacy Visa test client data
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { initializeApp } = require('firebase-admin/app');
+          const { FieldValue, getFirestore } = require('firebase-admin/firestore');
+
+          initializeApp({ projectId: 'automarket-fintech' });
+          const db = getFirestore();
+          const markerRef = db.doc('system_migrations/reset_visa_test_clients_20260904');
+
+          async function main() {
+            const marker = await markerRef.get();
+            if (marker.data()?.status === 'completed') {
+              console.log('Visa reset already completed:', marker.data());
+              return;
+            }
+
+            await markerRef.set({
+              status: 'running',
+              source: 'github-actions',
+              startedAt: Date.now(),
+            }, { merge: true });
+
+            let resetCards = 0;
+            let deletedRequests = 0;
+            let deletedDeliveries = 0;
+            let deletedCardAccounts = 0;
+            const resetCardIds = new Set();
+
+            const cards = await db.collection('cards').get();
+            for (const cardDoc of cards.docs) {
+              const card = cardDoc.data();
+              const assigned = Boolean(String(card.userId || '').trim());
+              const soldLike = ['sold', 'confirmed', 'reserved'].includes(String(card.saleStatus || '').toLowerCase());
+              if (!assigned && !soldLike) continue;
+
+              resetCardIds.add(cardDoc.id);
+              resetCards += 1;
+              await cardDoc.ref.set({
+                userId: '',
+                userName: '',
+                userEmail: '',
+                cardHolder: 'CLIENT MARKET-CASH',
+                cardHolderName: 'CLIENT MARKET-CASH',
+                status: 'disabled',
+                saleStatus: 'available',
+                soldAt: FieldValue.delete(),
+                soldBy: FieldValue.delete(),
+                soldByAgencyId: FieldValue.delete(),
+                soldByAgencyName: FieldValue.delete(),
+                printStatus: FieldValue.delete(),
+                printReady: FieldValue.delete(),
+                printedAt: FieldValue.delete(),
+                printedBy: FieldValue.delete(),
+                updatedAt: Date.now(),
+              }, { merge: true });
+            }
+
+            const requests = await db.collection('card_purchase_requests').get();
+            for (const requestDoc of requests.docs) {
+              await requestDoc.ref.delete();
+              deletedRequests += 1;
+            }
+
+            const deliveries = await db.collection('physical_card_requests').get();
+            for (const deliveryDoc of deliveries.docs) {
+              await deliveryDoc.ref.delete();
+              deletedDeliveries += 1;
+            }
+
+            const accounts = await db.collection('card_wallet_accounts').get();
+            for (const accountDoc of accounts.docs) {
+              if (!resetCardIds.has(String(accountDoc.data()?.cardId || ''))) continue;
+              await accountDoc.ref.delete();
+              deletedCardAccounts += 1;
+            }
+
+            const summary = {
+              status: 'completed',
+              source: 'github-actions',
+              completedAt: Date.now(),
+              resetCards,
+              deletedRequests,
+              deletedDeliveries,
+              deletedCardAccounts,
+            };
+            await markerRef.set(summary, { merge: true });
+            console.log('Visa test reset completed:', summary);
+          }
+
+          main().catch(error => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          NODE
