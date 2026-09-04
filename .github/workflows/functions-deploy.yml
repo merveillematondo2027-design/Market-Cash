@@ -76,14 +76,21 @@ jobs:
         run: |
           set -euo pipefail
 
-          # A local-card-only change does not need to redeploy the full historical
-          # Market-Cash function set. That full sequential deployment can take
-          # hours and puts unnecessary pressure on the regional Cloud Run quota.
+          # Targeted deploys avoid redeploying the complete historical function
+          # set when only the local-card rail or legacy spending guards changed.
           local_card_only=0
+          legacy_spending_guard_only=0
           if git rev-parse HEAD^ >/dev/null 2>&1; then
             mapfile -t function_changes < <(git diff --name-only HEAD^ HEAD -- functions/src)
             echo 'Changed function sources:'
             printf '%s\n' "${function_changes[@]:-}"
+
+            if [ "${#function_changes[@]}" -eq 1 ] \
+              && [ "${function_changes[0]}" = 'functions/src/entry.ts' ] \
+              && grep -q 'LEGACY_LOCAL_CARD_SPENDING_GUARD' functions/src/entry.ts; then
+              legacy_spending_guard_only=1
+            fi
+
             local_card_only=1
             for file in "${function_changes[@]}"; do
               case "$file" in
@@ -95,7 +102,17 @@ jobs:
             printf '%s\n' "${function_changes[@]}" | grep -qx 'functions/src/localCard.ts' || local_card_only=0
           fi
 
-          if [ "$local_card_only" -eq 1 ]; then
+          if [ "$legacy_spending_guard_only" -eq 1 ]; then
+            cat > /tmp/market-cash-functions.txt <<'EOF'
+          merchantPayment
+          createWithdrawalAuthorization
+          redeemWithdrawalAuthorization
+          agentCashOut
+          walletToInternalCard
+          agentCardCashOut
+          EOF
+            echo 'Legacy spending guard change detected: deploying only blocked legacy endpoints.'
+          elif [ "$local_card_only" -eq 1 ]; then
             cat > /tmp/market-cash-functions.txt <<'EOF'
           ensureLocalMarketCashCard
           getMyLocalMarketCashCards
