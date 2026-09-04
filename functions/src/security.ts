@@ -90,7 +90,7 @@ function oneYearValidity(createdAt?: number) {
   return { expiryStart: fmt(start), expiryEnd: fmt(end) };
 }
 
-async function syncLocalCardValidity(uid: string) {
+async function syncLocalCardValidity(uid: string): Promise<any | null> {
   const ref = db.doc(`local_cards/${localCardIdForUid(uid)}`);
   const snap = await ref.get();
   if (!snap.exists) return null;
