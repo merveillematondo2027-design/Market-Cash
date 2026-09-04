@@ -19,6 +19,7 @@ export interface VisaSecureData{
   expiryEnd:string;
   cvv:string;
   status:string;
+  balances?:Partial<Record<'USD'|'CDF',number>>;
 }
 
 const call=<TReq,TRes>(name:string)=>httpsCallable<TReq,TRes>(functions,name);
