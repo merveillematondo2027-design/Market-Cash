@@ -1,7 +1,9 @@
 import React,{useEffect,useMemo,useState}from'react';
-import{ArrowLeft,CheckCircle2,CreditCard,WalletCards}from'lucide-react';
+import{ArrowLeft,CheckCircle2,CreditCard,Eye,EyeOff,ShieldCheck,WalletCards}from'lucide-react';
 import{Link,useSearchParams}from'react-router-dom';
 import toast from'react-hot-toast';
+import SecurityConfirmModal from'../../components/SecurityConfirmModal';
+import{useSensitiveReveal}from'../../hooks/useSensitiveReveal';
 import{agentWalletService,InternalCardSummary,WalletServerSnapshot}from'../../services/agentWalletService';
 import{WalletCurrency}from'../../types/wallet';
 
@@ -19,6 +21,7 @@ export default function LocalCardTopup(){
   const[loading,setLoading]=useState(true);
   const[done,setDone]=useState(false);
   const[reference,setReference]=useState('');
+  const sensitive=useSensitiveReveal();
 
   const load=async()=>{
     const[wallet,cards]=await Promise.all([agentWalletService.getMyWallets(),agentWalletService.getMyInternalCards()]);
@@ -43,12 +46,12 @@ export default function LocalCardTopup(){
   return <div className="mx-auto max-w-xl p-4 pb-28 md:p-8">
     <Link to="/client/cards?card=local" className="inline-flex items-center gap-2 text-sm font-black text-slate-500"><ArrowLeft size={17}/>Ma carte locale</Link>
     <section className="mt-5 overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-sm">
-      <div className="bg-gradient-to-br from-blue-950 to-blue-800 p-6 text-white"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-black uppercase tracking-[.18em] text-blue-200">Market-Cash Locale</p><h1 className="mt-2 text-2xl font-black">Recharger ma carte</h1></div><div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10"><WalletCards size={24}/></div></div><p className="mt-4 text-sm text-blue-100">Le montant est transféré de votre portefeuille principal vers votre unique carte locale.</p></div>
+      <div className="bg-gradient-to-br from-blue-950 to-blue-800 p-6 text-white"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-black uppercase tracking-[.18em] text-blue-200">Market-Cash Locale</p><h1 className="mt-2 text-2xl font-black">Recharger ma carte</h1></div><div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10"><WalletCards size={24}/></div></div><p className="mt-4 text-sm text-blue-100">Le montant va directement de votre portefeuille principal vers votre unique carte locale. Aucune sélection de carte n’est nécessaire.</p></div>
 
       <div className="space-y-5 p-5 md:p-6">
-        {loading?<div className="rounded-2xl bg-slate-50 p-5 text-center text-sm font-bold text-slate-500">Chargement…</div>:!card?<div className="rounded-2xl bg-amber-50 p-4 text-sm font-bold text-amber-900">Aucune carte locale active.</div>:<div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4"><div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-2xl bg-white text-blue-900"><CreditCard/></div><div className="min-w-0 flex-1"><p className="truncate font-black text-slate-950">{card.cardHolder}</p><p className="font-mono text-sm font-black text-blue-950">{card.maskedNumber}</p></div></div><div className="mt-4 grid grid-cols-2 gap-3 border-t border-blue-100 pt-4"><div><p className="text-[9px] font-black uppercase text-slate-400">Solde wallet</p><p className="mt-1 font-black text-slate-950">{money(walletBalance,currency)}</p></div><div><p className="text-[9px] font-black uppercase text-slate-400">Solde carte</p><p className="mt-1 font-black text-slate-950">{money(cardBalance,currency)}</p></div></div></div>}
+        {loading?<div className="rounded-2xl bg-slate-50 p-5 text-center text-sm font-bold text-slate-500">Chargement…</div>:!card?<div className="rounded-2xl bg-amber-50 p-4 text-sm font-bold text-amber-900">Aucune carte locale active.</div>:<div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4"><div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-2xl bg-white text-blue-900"><CreditCard/></div><div className="min-w-0 flex-1"><p className="font-black text-slate-950">Votre carte locale</p><p className="font-mono text-sm font-black text-blue-950">{card.maskedNumber}</p></div><button type="button" onClick={sensitive.request} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white text-blue-950 shadow-sm" aria-label={sensitive.revealed?'Masquer les soldes':'Afficher les soldes'}>{sensitive.revealed?<EyeOff size={18}/>:<Eye size={18}/>}</button></div><div className="mt-4 grid grid-cols-2 gap-3 border-t border-blue-100 pt-4"><div><p className="text-[9px] font-black uppercase text-slate-400">Solde wallet</p><p className="mt-1 font-black text-slate-950">{sensitive.revealed?money(walletBalance,currency):'••••••'}</p></div><div><p className="text-[9px] font-black uppercase text-slate-400">Solde carte</p><p className="mt-1 font-black text-slate-950">{sensitive.revealed?money(cardBalance,currency):'••••••'}</p></div></div></div>}
 
-        <div className="inline-flex rounded-2xl bg-slate-100 p-1">{(['USD','CDF']as WalletCurrency[]).map(item=><button key={item} onClick={()=>{setCurrency(item);setDone(false)}} className={`rounded-xl px-5 py-2 text-xs font-black ${currency===item?'bg-white text-blue-950 shadow-sm':'text-slate-500'}`}>{item}</button>)}</div>
+        <div className="flex items-center justify-between gap-3"><div className="inline-flex rounded-2xl bg-slate-100 p-1">{(['USD','CDF']as WalletCurrency[]).map(item=><button key={item} onClick={()=>{setCurrency(item);setDone(false);sensitive.hide()}} className={`rounded-xl px-5 py-2 text-xs font-black ${currency===item?'bg-white text-blue-950 shadow-sm':'text-slate-500'}`}>{item}</button>)}</div><div className="flex items-center gap-1 text-[10px] font-bold text-slate-400"><ShieldCheck size={13}/>CVV pour confirmer</div></div>
 
         {done?<div className="rounded-3xl bg-emerald-50 p-6 text-center"><CheckCircle2 className="mx-auto text-emerald-600" size={42}/><h2 className="mt-3 text-xl font-black text-emerald-900">Recharge confirmée</h2><p className="mt-2 text-sm text-emerald-700">Votre carte locale a été créditée.</p><p className="mt-3 font-mono text-xs font-bold text-emerald-800">{reference}</p><button onClick={()=>setDone(false)} className="mt-5 rounded-2xl bg-white px-5 py-3 text-sm font-black text-emerald-800">Nouvelle recharge</button></div>:<>
           <label className="block"><span className="text-xs font-black uppercase tracking-wide text-slate-500">Montant · {currency}</span><input value={amount} onChange={e=>setAmount(e.target.value)} inputMode="decimal" placeholder="0" className="mt-2 w-full rounded-2xl border-2 border-slate-200 px-4 py-4 text-xl font-black text-blue-950 outline-none focus:border-blue-600"/></label>
@@ -58,5 +61,6 @@ export default function LocalCardTopup(){
         </>}
       </div>
     </section>
+    <SecurityConfirmModal open={sensitive.open} busy={sensitive.busy} onClose={sensitive.close} onConfirm={sensitive.confirm} title="Afficher les soldes" subtitle="Entrez le code secret de l’application. Le CVV reste réservé à la confirmation de la recharge."/>
   </div>;
 }
