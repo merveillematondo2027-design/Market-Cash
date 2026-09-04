@@ -14,3 +14,4 @@ export * from './agentAdmin';
 export * from './localCard';
 export * from './identifiers';
 export * from './walletV2';
+export * from './cardProducts';
