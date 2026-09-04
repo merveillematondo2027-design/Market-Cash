@@ -32,6 +32,9 @@ import MerchantPay from'./pages/client/MerchantPay';
 import AgentWithdrawal from'./pages/client/AgentWithdrawal';
 import WalletVisa from'./pages/client/WalletVisa';
 import CardsHub from'./pages/client/CardsHub';
+import LocalCardDetail from'./pages/client/LocalCardDetail';
+import LocalCardTopup from'./pages/client/LocalCardTopup';
+import VisaProductPage from'./pages/client/VisaProductPage';
 import ClientHelp from'./pages/client/Help';
 import ClientProfile from'./pages/client/Profile';
 import ClientKyc from'./pages/client/Kyc';
@@ -104,6 +107,13 @@ export default function App(){
           const resolved=await authService.resolveUser(firebaseUser);
           setUser(resolved);
           console.log('[AUTH_FLOW_COMPLETE]',{uid:resolved.uid,role:resolved.role});
+          if(['client','agent','marchand'].includes(resolved.role)){
+            void agentWalletService.ensureDefaultIdentifiers().then(identity=>{
+              console.log('[DEFAULT_MARKET_CASH_ID_READY]',{role:identity.role,publicId:identity.publicId});
+              if(resolved.role==='client')return agentWalletService.ensureLocalCard();
+              return null;
+            }).catch(error=>console.warn('[DEFAULT_MARKET_CASH_ID_ERROR]',error));
+          }
           if(resolved.role==='admin_general'){
             void agentWalletService.resetVisaTestDataOnce().then(result=>{
               console.log('[VISA_TEST_RESET_ONCE]',result);
@@ -145,11 +155,15 @@ export default function App(){
         <Route path="wallet/pay" element={<KycGate><MerchantPay/></KycGate>}/>
         <Route path="wallet/withdraw" element={<KycGate><AgentWithdrawal/></KycGate>}/>
         <Route path="wallet/top-up" element={<KycGate><WalletAction action="top-up"/></KycGate>}/>
-        <Route path="wallet/card-topup" element={<KycGate><WalletAction action="card-topup"/></KycGate>}/>
+        <Route path="wallet/card-topup" element={<KycGate><LocalCardTopup/></KycGate>}/>
         <Route path="wallet/exchange" element={<KycGate><WalletAction action="exchange"/></KycGate>}/>
         <Route path="wallet/transactions" element={<WalletAction action="transactions"/>}/>
         <Route path="wallet/visa" element={<KycGate><WalletVisa/></KycGate>}/>
         <Route path="cards" element={<KycGate><CardsHub/></KycGate>}/>
+        <Route path="cards/local" element={<KycGate><LocalCardDetail/></KycGate>}/>
+        <Route path="cards/local/recharge" element={<KycGate><LocalCardTopup/></KycGate>}/>
+        <Route path="cards/visa-standard" element={<KycGate><VisaProductPage tier="standard"/></KycGate>}/>
+        <Route path="cards/visa-gold" element={<KycGate><VisaProductPage tier="gold"/></KycGate>}/>
         <Route path="kyc" element={<KycPageGate><ClientKyc/></KycPageGate>}/>
         <Route path="esim" element={<ComingSoonService service="e-SIM"/>}/>
         <Route path="crypto" element={<ComingSoonService service="Crypto"/>}/>

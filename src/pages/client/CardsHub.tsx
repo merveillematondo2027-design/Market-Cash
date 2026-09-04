@@ -1,149 +1,119 @@
-import React, { useEffect, useState } from 'react';
-import { ArrowLeft, CreditCard, QrCode, RefreshCw, ShieldCheck, Store, WalletCards } from 'lucide-react';
-import { Link, useSearchParams } from 'react-router-dom';
-import { QRCodeSVG } from 'qrcode.react';
-import ClientCards from './Cards';
+import React, { useEffect, useMemo, useState } from 'react';
+import { CreditCard, Gem, LockKeyhole, ShieldCheck } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { db } from '../../firebase/config';
+import { useAuthStore } from '../../store/authStore';
 import { agentWalletService, InternalCardSummary } from '../../services/agentWalletService';
 
-const money = (value: number, currency: 'USD' | 'CDF') => currency === 'CDF'
-  ? `${Number(value || 0).toLocaleString('fr-FR', { maximumFractionDigits: 0 })} CDF`
-  : `${Number(value || 0).toFixed(2)} USD`;
+function hiddenName(name?: string) {
+  const clean = String(name || 'CLIENT MARKET-CASH').trim();
+  return clean.split(/\s+/).map(part => part ? `${part.charAt(0).toUpperCase()}${'•'.repeat(Math.max(3, Math.min(7, part.length - 1)))}` : '').join(' ');
+}
+
+function ProductCard({
+  title,
+  subtitle,
+  badge,
+  number,
+  holder,
+  identifier,
+  variant,
+}: {
+  title:string;
+  subtitle:string;
+  badge:string;
+  number:string;
+  holder:string;
+  identifier:string;
+  variant:'local'|'standard'|'gold';
+}) {
+  const shell = variant === 'gold'
+    ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-amber-950 border-amber-300/30'
+    : variant === 'standard'
+      ? 'bg-gradient-to-br from-blue-950 via-indigo-900 to-blue-700 border-blue-300/30'
+      : 'bg-gradient-to-br from-blue-600 via-blue-700 to-blue-950 border-cyan-300/30';
+  return (
+    <div className={`relative aspect-[1.586/1] overflow-hidden rounded-[1.7rem] border p-5 text-white shadow-xl ${shell}`}>
+      <div className="absolute -right-14 -top-16 h-48 w-48 rounded-full bg-white/10 blur-2xl" />
+      <div className="absolute -bottom-20 -left-12 h-52 w-52 rounded-full bg-black/25 blur-2xl" />
+      <div className="relative z-10 flex h-full flex-col justify-between">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-base font-black tracking-wide">MARKET<span className="text-amber-300">-CASH</span></p>
+            <p className="mt-1 text-[8px] font-black uppercase tracking-[.2em] text-white/70">{subtitle}</p>
+          </div>
+          <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[9px] font-black uppercase tracking-wider backdrop-blur">{badge}</span>
+        </div>
+        <div>
+          <div className="flex items-center gap-3"><div className="h-9 w-12 rounded-lg bg-gradient-to-br from-amber-100 via-amber-300 to-amber-500 shadow-inner" /><LockKeyhole size={18} className="text-white/75" /></div>
+          <p className="mt-5 font-mono text-xl font-black tracking-[.15em] sm:text-2xl">{number}</p>
+        </div>
+        <div className="flex items-end justify-between gap-3">
+          <div className="min-w-0"><p className="text-[7px] font-bold uppercase tracking-[.16em] text-white/60">Titulaire</p><p className="mt-1 truncate text-xs font-black">{holder}</p><p className="mt-1 truncate font-mono text-[8px] text-white/60">{identifier}</p></div>
+          <div className="text-right"><p className="text-[7px] font-bold uppercase tracking-[.16em] text-white/60">Produit</p><p className={`mt-1 text-sm font-black italic ${variant === 'gold' ? 'text-amber-300' : 'text-white'}`}>{title}</p></div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function CardsHub() {
-  const [searchParams] = useSearchParams();
-  const visaMode = searchParams.get('visa') === 'buy';
+  const { user } = useAuthStore();
   const [localCard, setLocalCard] = useState<InternalCardSummary | null>(null);
-  const [loadingLocal, setLoadingLocal] = useState(true);
-  const [localError, setLocalError] = useState('');
-
-  const loadLocalCard = async () => {
-    setLoadingLocal(true);
-    setLocalError('');
-    try {
-      await agentWalletService.ensureLocalCard();
-      const cards = await agentWalletService.getMyInternalCards();
-      setLocalCard(cards[0] || null);
-    } catch (error: any) {
-      console.error('[LOCAL_CARD_LOAD_ERROR]', error);
-      setLocalCard(null);
-      setLocalError(error?.message || 'Impossible de charger la carte locale pour le moment.');
-    } finally {
-      setLoadingLocal(false);
-    }
-  };
+  const [visaCards, setVisaCards] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!visaMode) void loadLocalCard();
-  }, [visaMode]);
+    if (!user?.uid) return;
+    let active = true;
+    agentWalletService.ensureLocalCard()
+      .then(() => agentWalletService.getMyInternalCards())
+      .then(cards => { if (active) setLocalCard(cards[0] || null); })
+      .catch(error => console.warn('[CARDS_HUB_LOCAL_ERROR]', error))
+      .finally(() => { if (active) setLoading(false); });
+    const stop = onSnapshot(query(collection(db, 'cards'), where('userId', '==', user.uid)), snap => {
+      setVisaCards(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter((card:any) => String(card.network || 'visa').toLowerCase() === 'visa'));
+    }, error => console.warn('[CARDS_HUB_VISA_ERROR]', error));
+    return () => { active = false; stop(); };
+  }, [user?.uid]);
 
-  if (visaMode) {
-    return (
-      <div className="pb-28">
-        <section className="mx-auto max-w-4xl px-3.5 pt-4 sm:px-6">
-          <Link to="/client/cards" className="inline-flex items-center gap-2 text-sm font-black text-slate-500">
-            <ArrowLeft size={16} /> Retour aux cartes
-          </Link>
-          <div className="mt-5 rounded-3xl border border-blue-100 bg-blue-50 p-5">
-            <p className="text-[10px] font-black uppercase tracking-[.18em] text-blue-700">Produit international séparé</p>
-            <h1 className="mt-1 text-2xl font-black text-slate-950">Acheter une carte Visa</h1>
-            <p className="mt-2 text-xs leading-5 text-slate-600">
-              Cet espace sert uniquement aux demandes d'achat Visa. La Visa n'est pas utilisée pour les retraits et paiements locaux Market-Cash.
-            </p>
-          </div>
-        </section>
-        <ClientCards />
-      </div>
-    );
-  }
+  const standard = useMemo(() => visaCards.filter(card => String(card.visaTier || 'standard').toLowerCase() !== 'gold'), [visaCards]);
+  const gold = useMemo(() => visaCards.filter(card => String(card.visaTier || '').toLowerCase() === 'gold'), [visaCards]);
+  const standardFirst = standard[0];
+  const goldFirst = gold[0];
+  const localLast4 = localCard?.maskedNumber?.replace(/\D/g, '').slice(-4) || '••••';
+  const standardLast4 = String(standardFirst?.cardNumber || '').replace(/\D/g, '').slice(-4) || '••••';
+  const goldLast4 = String(goldFirst?.cardNumber || '').replace(/\D/g, '').slice(-4) || '••••';
 
   return (
-    <div className="pb-28">
-      <section className="mx-auto max-w-4xl px-3.5 pt-4 sm:px-6">
-        <div className="mb-4 flex items-end justify-between gap-3">
-          <div>
-            <p className="text-[11px] font-black uppercase tracking-[.18em] text-emerald-700">Paiements locaux Market-Cash</p>
-            <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-950">Ma carte locale</h1>
-            <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">
-              Cette carte est attribuée automatiquement à votre compte. Retraits chez les Agents et paiements marchands sont débités ici, jamais directement du portefeuille principal.
-            </p>
-          </div>
-          <span className="hidden rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase text-emerald-700 sm:inline-flex">1 carte locale / compte</span>
-        </div>
+    <div className="mx-auto max-w-5xl space-y-5 px-4 pb-28 pt-5 md:px-8">
+      <header className="flex items-start justify-between gap-4">
+        <div><p className="text-[11px] font-black uppercase tracking-[.18em] text-blue-700">Espace cartes</p><h1 className="mt-1 text-3xl font-black tracking-tight text-slate-950">Mes cartes Market-Cash</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Choisissez une carte pour ouvrir son espace. Les soldes, recharges et autres actions ne sont pas affichés sur cette page.</p></div>
+        <div className="hidden rounded-2xl bg-emerald-50 p-3 text-emerald-700 sm:block"><ShieldCheck /></div>
+      </header>
 
-        {loadingLocal ? (
-          <div className="grid min-h-48 place-items-center rounded-3xl border bg-white shadow-sm">
-            <div className="flex items-center gap-2 text-sm font-bold text-slate-500"><RefreshCw className="animate-spin" size={18} /> Création / chargement de la carte locale…</div>
-          </div>
-        ) : localError ? (
-          <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5">
-            <p className="font-black text-amber-900">Carte locale momentanément indisponible</p>
-            <p className="mt-1 text-xs leading-5 text-amber-800">{localError}</p>
-            <button onClick={() => void loadLocalCard()} className="mt-4 rounded-2xl bg-blue-950 px-4 py-3 text-xs font-black text-white">Réessayer</button>
-          </div>
-        ) : localCard ? (
-          <div className="grid gap-4 md:grid-cols-[1.35fr_.65fr]">
-            <div className="relative aspect-[1.586/1] overflow-hidden rounded-[1.65rem] border border-blue-300/40 bg-gradient-to-br from-blue-600 via-blue-700 to-blue-950 p-5 text-white shadow-xl">
-              <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-cyan-300/20 blur-2xl" />
-              <div className="absolute -bottom-24 -left-14 h-64 w-64 rounded-full bg-blue-950/70 blur-2xl" />
-              <div className="relative z-10 flex h-full flex-col justify-between">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-base font-black tracking-wide">MARKET<span className="text-amber-300">-CASH</span></p>
-                    <p className="mt-1 text-[8px] font-extrabold uppercase tracking-[.22em] text-blue-100">Carte locale • USD / CDF</p>
-                  </div>
-                  <div className="rounded-xl bg-white p-1.5 shadow-lg">
-                    <QRCodeSVG value={localCard.qrData || `MARKET-CASH-CARD:${localCard.cardIdentifier}`} size={42} level="M" />
-                  </div>
-                </div>
+      {loading && !localCard ? <div className="rounded-3xl border bg-white p-8 text-center text-sm font-bold text-slate-500">Préparation de votre carte locale…</div> : null}
 
-                <div>
-                  <div className="flex items-center gap-3"><div className="h-9 w-12 rounded-lg bg-gradient-to-br from-amber-100 via-amber-300 to-amber-500 shadow-inner" /><QrCode size={23} className="text-white/90" /></div>
-                  <p className="mt-5 font-mono text-xl font-black tracking-[.14em] drop-shadow sm:text-2xl">{localCard.maskedNumber}</p>
-                </div>
+      <div className="grid gap-5 lg:grid-cols-3">
+        <Link to="/client/cards/local" className="group block rounded-[2rem] border border-slate-200 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
+          <div className="mb-3 flex items-center justify-between px-2"><div><p className="text-sm font-black text-slate-950">1. Market-Cash Locale</p><p className="text-[11px] text-slate-500">USD / CDF • 1 carte par client</p></div><CreditCard size={19} className="text-blue-700" /></div>
+          <ProductCard title="LOCALE" subtitle="Carte locale • USD / CDF" badge="1 / 1" number={`•••• •••• •••• ${localLast4}`} holder={hiddenName(localCard?.cardHolder)} identifier={localCard?.cardIdentifier || 'MCL-•••••••••••'} variant="local" />
+          <p className="px-2 pt-3 text-xs font-bold text-blue-800">Touchez la carte pour ouvrir son espace →</p>
+        </Link>
 
-                <div className="flex items-end justify-between gap-4">
-                  <div className="min-w-0"><p className="text-[7px] font-bold uppercase tracking-[.16em] text-blue-100">Titulaire</p><p className="mt-1 truncate text-xs font-black">{localCard.cardHolder}</p><p className="mt-1 truncate font-mono text-[8px] text-blue-100">{localCard.cardIdentifier}</p></div>
-                  <div className="text-right"><p className="text-[7px] font-bold uppercase tracking-[.16em] text-blue-100">Réseau</p><p className="mt-1 text-sm font-black italic">LOCAL</p></div>
-                </div>
-              </div>
-            </div>
+        <Link to="/client/cards/visa-standard" className="group block rounded-[2rem] border border-slate-200 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
+          <div className="mb-3 flex items-center justify-between px-2"><div><p className="text-sm font-black text-slate-950">2. Market-Cash Visa Standard</p><p className="text-[11px] text-slate-500">Jusqu’à 4 cartes • approvisionnement Vodacom</p></div><CreditCard size={19} className="text-indigo-700" /></div>
+          <ProductCard title="VISA" subtitle="Visa Standard" badge={`${standard.length} / 4`} number={`•••• •••• •••• ${standardLast4}`} holder={hiddenName(standardFirst?.cardHolder || user?.displayName)} identifier={standardFirst?.cardIdentifier || 'VISA ••••••••••'} variant="standard" />
+          <p className="px-2 pt-3 text-xs font-bold text-indigo-800">Touchez la carte pour ouvrir son espace →</p>
+        </Link>
 
-            <div className="grid gap-3">
-              <div className="rounded-3xl border bg-white p-4 shadow-sm">
-                <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Solde carte locale</p>
-                <p className="mt-2 text-xl font-black text-blue-950">{money(Number(localCard.balances?.USD || 0), 'USD')}</p>
-                <p className="mt-1 text-lg font-black text-slate-800">{money(Number(localCard.balances?.CDF || 0), 'CDF')}</p>
-              </div>
-              <Link to="/client/wallet/card-topup" className="flex items-center justify-between rounded-2xl bg-amber-400 p-4 font-black text-blue-950 shadow-sm"><span className="flex items-center gap-2"><WalletCards size={18} /> Recharger la carte</span><span>→</span></Link>
-              <Link to="/client/wallet/pay" className="flex items-center justify-between rounded-2xl border bg-white p-4 text-sm font-black text-blue-950"><span className="flex items-center gap-2"><Store size={18} /> Payer un marchand</span><span>→</span></Link>
-              <Link to="/client/wallet/withdraw" className="flex items-center justify-between rounded-2xl border bg-white p-4 text-sm font-black text-blue-950"><span className="flex items-center gap-2"><ShieldCheck size={18} /> Retrait chez Agent</span><span>→</span></Link>
-            </div>
-          </div>
-        ) : null}
-
-        <div className="mt-8 rounded-3xl border border-blue-100 bg-blue-50 p-4 text-xs leading-5 text-blue-950">
-          <b>Flux retenu :</b> dépôt → portefeuille principal → recharge de la carte locale → paiement ou retrait. La carte Visa reste un produit séparé et n’est pas utilisée pour les opérations locales.
-        </div>
-
-        <div className="mt-10 border-t pt-8">
-          <div className="rounded-3xl border bg-white p-5 shadow-sm">
-            <div className="flex items-start gap-3">
-              <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-slate-100 text-blue-950"><CreditCard size={23} /></div>
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-black uppercase tracking-[.16em] text-slate-400">Produit séparé</p>
-                <h2 className="mt-1 text-xl font-black text-slate-950">Carte Visa</h2>
-                <p className="mt-1 text-xs leading-5 text-slate-500">Aucune Visa n'est attribuée automatiquement. Le client peut uniquement lancer une demande d'achat.</p>
-                <div className="mt-4 rounded-2xl bg-slate-50 p-3 text-xs text-slate-600">
-                  <b>État actuel :</b> 0 Visa attribuée automatiquement. Les anciennes cartes de test ont été retirées du parcours client.
-                </div>
-                <Link to="/client/cards?visa=buy" className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-4 text-sm font-black text-white shadow-sm sm:w-auto">
-                  <CreditCard size={18} /> Acheter une carte Visa
-                </Link>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+        <Link to="/client/cards/visa-gold" className="group block rounded-[2rem] border border-amber-200 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
+          <div className="mb-3 flex items-center justify-between px-2"><div><p className="text-sm font-black text-slate-950">3. Market-Cash Visa Gold</p><p className="text-[11px] text-slate-500">1 seule carte Gold par client</p></div><Gem size={19} className="text-amber-600" /></div>
+          <ProductCard title="VISA GOLD" subtitle="Visa Gold" badge={`${gold.length} / 1`} number={`•••• •••• •••• ${goldLast4}`} holder={hiddenName(goldFirst?.cardHolder || user?.displayName)} identifier={goldFirst?.cardIdentifier || 'GOLD ••••••••••'} variant="gold" />
+          <p className="px-2 pt-3 text-xs font-bold text-amber-700">Touchez la carte pour ouvrir son espace →</p>
+        </Link>
+      </div>
     </div>
   );
 }

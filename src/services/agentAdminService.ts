@@ -37,8 +37,8 @@ export interface AgentAdminDetails {
   transactions:any[];
 }
 
-const getDetails=httpsCallable<{agentUid:string},AgentAdminDetails>(functions,'adminGetAgentDetails');
-const fund=httpsCallable<{agentUid:string;currency:WalletCurrency;amount:number;reason:string},{ok:boolean;transactionId:string;reference:string;wallets:AgentAdminDetails['wallets']}>(functions,'adminFundAgentFloatV2');
+const getDetails=httpsCallable<{agentUid:string},AgentAdminDetails>(functions,'adminGetAgentDetailsV2');
+const fund=httpsCallable<{agentUid:string;currency:WalletCurrency;amount:number;reason:string},{ok:boolean;transactionId:string;reference:string;wallets:AgentAdminDetails['wallets']}>(functions,'adminFundAgentFloatV3');
 
 export const agentAdminService={
   getDetails:async(agentUid:string)=>(await getDetails({agentUid})).data,
