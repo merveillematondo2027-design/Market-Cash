@@ -133,7 +133,7 @@ export const agentWalletService = {
   redeemWithdrawalAuthorization: async(input:{code:string;pin:string;idempotencyKey:string}) => (await call<typeof input,{ok:boolean;reference:string;transactionId:string;amount:number;currency:WalletCurrency}>('redeemWithdrawalAuthorization')(input)).data,
 
   ensureLocalCard: async() => (await call<Record<string,never>,{ok:boolean;cardId:string;cardIdentifier:string}>('ensureLocalMarketCashCardV2')({})).data,
-  getMyInternalCards: async() => (await call<Record<string,never>,{cards:InternalCardSummary[]}>('getMyLocalMarketCashCardsV2')({})).data.cards,
+  getMyInternalCards: async() => (await call<Record<string,never>,{cards:InternalCardSummary[]}>('getMyLocalCardSummarySecure')({})).data.cards,
   revealLocalCardBalance: async(pin:string) => (await call<{pin:string},{ok:boolean;cardId:string;cardIdentifier:string;balances:Partial<Record<WalletCurrency,number>>;revealedAt:number}>('revealLocalMarketCashCardBalance')({pin})).data,
   fundInternalCard: async(input:{cardId:string;currency:WalletCurrency;amount:number;pin:string;idempotencyKey:string}) => (await call<typeof input,{ok:boolean;reference:string;transactionId:string}>('walletToLocalMarketCashCard')(input)).data,
   getMyWalletHistory: async() => (await call<Record<string,never>,{transactions:any[]}>('getMyWalletHistory')({})).data.transactions,
