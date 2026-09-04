@@ -39,6 +39,7 @@ import ComingSoonService from'./pages/client/ComingSoonService';
 import BusinessHome from'./pages/business/BusinessHome';
 import BusinessCollect from'./pages/business/BusinessCollect';
 import BusinessHistory from'./pages/business/BusinessHistory';
+import BusinessProfile from'./pages/business/BusinessProfile';
 import AdminDashboard from'./pages/admin/Dashboard';
 import AdminUsers from'./pages/admin/Users';
 import AdminAgents from'./pages/admin/AdminAgents';
@@ -105,11 +106,7 @@ export default function App(){
           setUser(resolved);
           console.log('[AUTH_FLOW_COMPLETE]',{uid:resolved.uid,role:resolved.role});
           if(resolved.role==='admin_general'){
-            void agentWalletService.resetVisaTestDataOnce().then(result=>{
-              console.log('[VISA_TEST_RESET_ONCE]',result);
-            }).catch(error=>{
-              console.warn('[VISA_TEST_RESET_RETRY_LATER]',error);
-            });
+            void agentWalletService.resetVisaTestDataOnce().then(result=>{console.log('[VISA_TEST_RESET_ONCE]',result)}).catch(error=>{console.warn('[VISA_TEST_RESET_RETRY_LATER]',error)});
           }
           stopProfile=onSnapshot(doc(db,'users',firebaseUser.uid),snapshot=>{
             if(!snapshot.exists())return;
@@ -117,104 +114,41 @@ export default function App(){
             setUser(live);
             console.log('[AUTH_ROLE_SYNC]',{uid:live.uid,role:live.role,kycStatus:live.kycStatus,accountStatus:live.accountStatus||'active'});
           },error=>console.warn('[AUTH_ROLE_SYNC_ERROR]',error));
-        }catch(error:any){
-          console.error('[USER_PROFILE_ERROR]',error?.message);
-          setUser(null);
-        }
+        }catch(error:any){console.error('[USER_PROFILE_ERROR]',error?.message);setUser(null)}
       }else setUser(null);
       setLoading(false);
     });
-    return()=>{stopProfile?.();stopAuth();};
+    return()=>{stopProfile?.();stopAuth()};
   },[setFirebaseUser,setUser,setLoading]);
 
   return <BrowserRouter>
-    <FirestoreNetworkBanner/>
-    <Toaster position="top-center"/>
+    <FirestoreNetworkBanner/><Toaster position="top-center"/>
     <Routes>
-      <Route path="/" element={<Home/>}/>
-      <Route path="/login" element={<Login/>}/>
-      <Route path="/register" element={<Register/>}/>
-      <Route path="/pin" element={<PinScreen/>}/>
+      <Route path="/" element={<Home/>}/><Route path="/login" element={<Login/>}/><Route path="/register" element={<Register/>}/><Route path="/pin" element={<PinScreen/>}/>
 
       <Route path="/client" element={<Guard allowedRoles={['client']}><ClientLayout/></Guard>}>
-        <Route index element={<Navigate to="/client/home" replace/>}/>
-        <Route path="home" element={<ClientHome/>}/>
-        <Route path="wallet" element={<ClientWallet/>}/>
-        <Route path="wallet/send" element={<KycGate><WalletAction action="send"/></KycGate>}/>
-        <Route path="wallet/receive" element={<WalletAction action="receive"/>}/>
-        <Route path="wallet/pay" element={<KycGate><MerchantPay/></KycGate>}/>
-        <Route path="wallet/withdraw" element={<KycGate><AgentWithdrawal/></KycGate>}/>
-        <Route path="wallet/top-up" element={<KycGate><WalletAction action="top-up"/></KycGate>}/>
-        <Route path="wallet/card-topup" element={<KycGate><WalletAction action="card-topup"/></KycGate>}/>
-        <Route path="wallet/exchange" element={<KycGate><WalletAction action="exchange"/></KycGate>}/>
-        <Route path="wallet/transactions" element={<WalletAction action="transactions"/>}/>
-        <Route path="wallet/visa" element={<KycGate><WalletVisa/></KycGate>}/>
-        <Route path="cards" element={<KycGate><CardsHub/></KycGate>}/>
-        <Route path="kyc" element={<KycPageGate><ClientKyc/></KycPageGate>}/>
-        <Route path="esim" element={<ComingSoonService service="e-SIM"/>}/>
-        <Route path="crypto" element={<ComingSoonService service="Crypto"/>}/>
-        <Route path="help" element={<ClientHelp/>}/>
-        <Route path="profile" element={<ClientProfile/>}/>
+        <Route index element={<Navigate to="/client/home" replace/>}/><Route path="home" element={<ClientHome/>}/><Route path="wallet" element={<ClientWallet/>}/>
+        <Route path="wallet/send" element={<KycGate><WalletAction action="send"/></KycGate>}/><Route path="wallet/receive" element={<WalletAction action="receive"/>}/><Route path="wallet/pay" element={<KycGate><MerchantPay/></KycGate>}/><Route path="wallet/withdraw" element={<KycGate><AgentWithdrawal/></KycGate>}/><Route path="wallet/top-up" element={<KycGate><WalletAction action="top-up"/></KycGate>}/><Route path="wallet/card-topup" element={<KycGate><WalletAction action="card-topup"/></KycGate>}/><Route path="wallet/exchange" element={<KycGate><WalletAction action="exchange"/></KycGate>}/><Route path="wallet/transactions" element={<WalletAction action="transactions"/>}/><Route path="wallet/visa" element={<KycGate><WalletVisa/></KycGate>}/>
+        <Route path="cards" element={<KycGate><CardsHub/></KycGate>}/><Route path="kyc" element={<KycPageGate><ClientKyc/></KycPageGate>}/><Route path="esim" element={<ComingSoonService service="e-SIM"/>}/><Route path="crypto" element={<ComingSoonService service="Crypto"/>}/><Route path="help" element={<ClientHelp/>}/><Route path="profile" element={<ClientProfile/>}/>
       </Route>
 
       <Route path="/business" element={<Guard allowedRoles={['marchand']}><BusinessLayout/></Guard>}>
-        <Route index element={<Navigate to="home" replace/>}/>
-        <Route path="home" element={<BusinessHome/>}/>
-        <Route path="collect" element={<BusinessCollect/>}/>
-        <Route path="history" element={<BusinessHistory/>}/>
-        <Route path="profile" element={<ClientProfile/>}/>
+        <Route index element={<Navigate to="home" replace/>}/><Route path="home" element={<BusinessHome/>}/><Route path="collect" element={<BusinessCollect/>}/><Route path="history" element={<BusinessHistory/>}/><Route path="profile" element={<BusinessProfile/>}/>
       </Route>
 
       <Route path="/agent" element={<Guard allowedRoles={['agent']}><AgentGate><AgentLayout/></AgentGate></Guard>}>
-        <Route index element={<Navigate to="terminal" replace/>}/>
-        <Route path="terminal" element={<AgentTerminal/>}/>
-        <Route path="history" element={<AgentHistory/>}/>
-        <Route path="profile" element={<AgentProfile/>}/>
+        <Route index element={<Navigate to="terminal" replace/>}/><Route path="terminal" element={<AgentTerminal/>}/><Route path="history" element={<AgentHistory/>}/><Route path="profile" element={<AgentProfile/>}/>
       </Route>
 
       <Route path="/admin" element={<Guard allowedRoles={['admin_general','agent_administratif']}><AdminLayout/></Guard>}>
-        <Route index element={<Navigate to="dashboard" replace/>}/>
-        <Route path="dashboard" element={<AdminHome/>}/>
-        <Route path="users" element={<AdminUsers/>}/>
-        <Route path="account-requests" element={<AccountRequests/>}/>
-        <Route path="notifications" element={<AdminNotifications/>}/>
-        <Route path="profile" element={<AdminProfile/>}/>
-        <Route path="agents" element={<AdminGeneralOnly><AdminAgents/></AdminGeneralOnly>}/>
-        <Route path="agents/:agentUid" element={<AdminGeneralOnly><AdminAgentDetails/></AdminGeneralOnly>}/>
-        <Route path="stock" element={<AdminGeneralOnly><AdminStock/></AdminGeneralOnly>}/>
-        <Route path="library" element={<AdminGeneralOnly><CardLibrary/></AdminGeneralOnly>}/>
-        <Route path="requests" element={<AdminGeneralOnly><AdminRequests/></AdminGeneralOnly>}/>
-        <Route path="deliveries" element={<AdminGeneralOnly><AdminDeliveries/></AdminGeneralOnly>}/>
-        <Route path="settings" element={<AdminGeneralOnly><AdminSettings/></AdminGeneralOnly>}/>
-        <Route path="help" element={<AdminGeneralOnly><AdminHelp/></AdminGeneralOnly>}/>
-        <Route path="logs" element={<AdminGeneralOnly><LogsCenter/></AdminGeneralOnly>}/>
+        <Route index element={<Navigate to="dashboard" replace/>}/><Route path="dashboard" element={<AdminHome/>}/><Route path="users" element={<AdminUsers/>}/><Route path="account-requests" element={<AccountRequests/>}/><Route path="notifications" element={<AdminNotifications/>}/><Route path="profile" element={<AdminProfile/>}/><Route path="agents" element={<AdminGeneralOnly><AdminAgents/></AdminGeneralOnly>}/><Route path="agents/:agentUid" element={<AdminGeneralOnly><AdminAgentDetails/></AdminGeneralOnly>}/><Route path="stock" element={<AdminGeneralOnly><AdminStock/></AdminGeneralOnly>}/><Route path="library" element={<AdminGeneralOnly><CardLibrary/></AdminGeneralOnly>}/><Route path="requests" element={<AdminGeneralOnly><AdminRequests/></AdminGeneralOnly>}/><Route path="deliveries" element={<AdminGeneralOnly><AdminDeliveries/></AdminGeneralOnly>}/><Route path="settings" element={<AdminGeneralOnly><AdminSettings/></AdminGeneralOnly>}/><Route path="help" element={<AdminGeneralOnly><AdminHelp/></AdminGeneralOnly>}/><Route path="logs" element={<AdminGeneralOnly><LogsCenter/></AdminGeneralOnly>}/>
       </Route>
 
       <Route path="/agency" element={<Guard allowedRoles={['chef_agence','admin_general']}><AgencyLayout/></Guard>}>
-        <Route index element={<Navigate to="dashboard" replace/>}/>
-        <Route path="dashboard" element={<AgencyDashboard/>}/>
-        <Route path="cards" element={<AgencyCards/>}/>
-        <Route path="requests" element={<AgencyRequests/>}/>
-        <Route path="deliveries" element={<AgencyDeliveries/>}/>
-        <Route path="notifications" element={<AgencyNotifications/>}/>
-        <Route path="profile" element={<AgencyProfile/>}/>
+        <Route index element={<Navigate to="dashboard" replace/>}/><Route path="dashboard" element={<AgencyDashboard/>}/><Route path="cards" element={<AgencyCards/>}/><Route path="requests" element={<AgencyRequests/>}/><Route path="deliveries" element={<AgencyDeliveries/>}/><Route path="notifications" element={<AgencyNotifications/>}/><Route path="profile" element={<AgencyProfile/>}/>
       </Route>
-
-      <Route path="/designer" element={<Guard allowedRoles={['designer_graphique']}><DesignerLayout/></Guard>}>
-        <Route path="design" element={<AdminDesigner/>}/>
-        <Route path="cards" element={<DesignerCards/>}/>
-        <Route path="notifications" element={<DesignerNotifications/>}/>
-        <Route path="profile" element={<DesignerProfile/>}/>
-      </Route>
-
-      <Route path="/delivery" element={<Guard allowedRoles={['livreur','admin_general']}><DeliveryLayout/></Guard>}>
-        <Route index element={<Navigate to="dashboard" replace/>}/>
-        <Route path="dashboard" element={<DeliveryDashboard/>}/>
-        <Route path="history" element={<DeliveryHistory/>}/>
-        <Route path="notifications" element={<DeliveryNotifications/>}/>
-        <Route path="profile" element={<DeliveryProfile/>}/>
-      </Route>
-
+      <Route path="/designer" element={<Guard allowedRoles={['designer_graphique']}><DesignerLayout/></Guard>}><Route path="design" element={<AdminDesigner/>}/><Route path="cards" element={<DesignerCards/>}/><Route path="notifications" element={<DesignerNotifications/>}/><Route path="profile" element={<DesignerProfile/>}/></Route>
+      <Route path="/delivery" element={<Guard allowedRoles={['livreur','admin_general']}><DeliveryLayout/></Guard>}><Route index element={<Navigate to="dashboard" replace/>}/><Route path="dashboard" element={<DeliveryDashboard/>}/><Route path="history" element={<DeliveryHistory/>}/><Route path="notifications" element={<DeliveryNotifications/>}/><Route path="profile" element={<DeliveryProfile/>}/></Route>
       <Route path="*" element={<Navigate to="/" replace/>}/>
     </Routes>
   </BrowserRouter>;
