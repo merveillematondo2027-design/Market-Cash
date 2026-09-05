@@ -44,6 +44,7 @@ function parseAmount(value: unknown) {
 
 const DEFAULT_FEES = {
   developer_card_payment: { percent: 2.5, minUsd: 0.15, minCdf: 350, chargedTo: 'payer' },
+  developer_card_payment_partner: { percent: 1.5, minUsd: 0.10, minCdf: 250, chargedTo: 'payer' },
   merchant_payment: { percent: 2.0, minUsd: 0.10, minCdf: 250, chargedTo: 'payer' },
   market_cash_transfer: { percent: 1.5, minUsd: 0.05, minCdf: 150, chargedTo: 'sender' },
   wallet_to_card: { percent: 0.5, minUsd: 0.02, minCdf: 50, chargedTo: 'wallet' },
@@ -85,19 +86,26 @@ export const createDeveloperAccount = onCall({ region: REGION }, async request =
   const uid = requireAuth(request);
   const companyName = normalize(request.data?.companyName);
   const contactEmail = normalize(request.data?.contactEmail);
+  const requestedType = normalize(request.data?.businessType);
+  const businessType = requestedType === 'api_provider' ? 'api_provider' : 'direct_developer';
   if (companyName.length < 2) throw new HttpsError('invalid-argument', 'Nom entreprise requis.');
   if (!/^\S+@\S+\.\S+$/.test(contactEmail)) throw new HttpsError('invalid-argument', 'Email invalide.');
   const developerId = developerAccountId(uid);
   const ref = db.doc(`developer_accounts/${developerId}`);
   const existing = await ref.get();
   const now = Date.now();
+  if (existing.exists && existing.data()?.status === 'active' && existing.data()?.businessType !== businessType) {
+    throw new HttpsError('failed-precondition', 'Le type d’un compte Developer actif ne peut pas être changé sans validation administrative.');
+  }
   await ref.set({
-    developerId, userId: uid, companyName, contactEmail,
+    developerId, userId: uid, companyName, contactEmail, businessType,
+    pricingTier: businessType === 'api_provider' ? 'wholesale' : 'direct',
+    partnerEnabled: existing.data()?.partnerEnabled || false,
     status: existing.data()?.status || 'pending',
     createdAt: existing.data()?.createdAt || now, updatedAt: now,
   }, { merge: true });
   await ensureDeveloperWallets(developerId, uid);
-  return { developerId, status: existing.data()?.status || 'pending' };
+  return { developerId, businessType, status: existing.data()?.status || 'pending' };
 });
 
 export const approveDeveloperAccount = onCall({ region: REGION }, async request => {
@@ -108,11 +116,12 @@ export const approveDeveloperAccount = onCall({ region: REGION }, async request 
   const snap = await ref.get();
   if (!snap.exists) throw new HttpsError('not-found', 'Compte développeur introuvable.');
   const now = Date.now();
-  await ref.set({ status: 'active', approvedBy: adminUid, approvedAt: now, updatedAt: now }, { merge: true });
+  const businessType = snap.data()?.businessType === 'api_provider' ? 'api_provider' : 'direct_developer';
+  await ref.set({ status: 'active', partnerEnabled: businessType === 'api_provider', pricingTier: businessType === 'api_provider' ? 'wholesale' : 'direct', approvedBy: adminUid, approvedAt: now, updatedAt: now }, { merge: true });
   const uid = String(snap.data()?.userId || '');
-  if (uid) await db.doc(`users/${uid}`).set({ developerEnabled: true, updatedAt: now }, { merge: true });
-  await db.collection('audit_events').add({ actorId: adminUid, action: 'DEVELOPER_ACCOUNT_APPROVED', developerId, createdAt: now });
-  return { ok: true, developerId };
+  if (uid) await db.doc(`users/${uid}`).set({ role: 'marchand', developerEnabled: true, apiProviderEnabled: businessType === 'api_provider', businessAccountType: businessType, updatedAt: now }, { merge: true });
+  await db.collection('audit_events').add({ actorId: adminUid, action: 'DEVELOPER_ACCOUNT_APPROVED', developerId, businessType, createdAt: now });
+  return { ok: true, developerId, businessType };
 });
 
 export const registerDeveloperApp = onCall({ region: REGION }, async request => {
@@ -122,15 +131,21 @@ export const registerDeveloperApp = onCall({ region: REGION }, async request => 
   if (!developer.exists || developer.data()?.status !== 'active') throw new HttpsError('failed-precondition', 'Compte développeur non approuvé.');
   const appName = normalize(request.data?.appName);
   if (appName.length < 2) throw new HttpsError('invalid-argument', 'Nom application requis.');
-  const appId = `APP-${randomBytes(6).toString('hex').toUpperCase()}`;
-  const apiKey = `mck_live_${randomBytes(24).toString('hex')}`;
+  const provider = developer.data()?.businessType === 'api_provider';
+  const appId = `${provider ? 'PAPP' : 'APP'}-${randomBytes(6).toString('hex').toUpperCase()}`;
+  const apiKey = `${provider ? 'mcp' : 'mck'}_live_${randomBytes(24).toString('hex')}`;
+  const scopes = provider
+    ? ['payments.create','transactions.read','balance.read','developers.create','developers.read']
+    : ['payments.create','transactions.read','balance.read'];
   const now = Date.now();
   await db.doc(`developer_apps/${appId}`).set({
     appId, developerId, userId: uid, appName,
-    apiKeyHash: sha256(apiKey), status: 'active',
+    apiKeyHash: sha256(apiKey), status: 'active', scopes,
+    businessType: provider ? 'api_provider' : 'direct_developer',
+    pricingTier: provider ? 'wholesale' : 'direct',
     allowedCurrencies: [...CURRENCIES], createdAt: now, updatedAt: now,
   });
-  return { appId, apiKey, appName, note: 'Copiez cette clé maintenant. Market-Cash ne la réaffichera pas.' };
+  return { appId, apiKey, appName, scopes, note: 'Copiez cette clé maintenant. Market-Cash ne la réaffichera pas.' };
 });
 
 export const getMyDeveloperDashboard = onCall({ region: REGION }, async request => {
@@ -223,7 +238,9 @@ export const marketCashApiCardPayment = onRequest({ region: REGION }, async (req
     const revenueRef = db.doc(`platform_revenue_accounts/${revenueWalletId(currency)}`);
     const txRef = db.doc(`wallet_transactions/${txId}`);
     const securityRef = db.doc(`user_security/${clientUid}`);
-    const fee = await feeFor('developer_card_payment', amount, currency);
+    const partnerPricing = auth.developer.businessType === 'api_provider';
+    const feeAction: FeeAction = partnerPricing ? 'developer_card_payment_partner' : 'developer_card_payment';
+    const fee = await feeFor(feeAction, amount, currency);
     const totalDebit = roundMoney(amount + fee);
 
     const result = await db.runTransaction(async tx => {
@@ -256,7 +273,8 @@ export const marketCashApiCardPayment = onRequest({ region: REGION }, async (req
         currency, amount, feeAmount: fee, totalDebited: totalDebit, netAmount: amount,
         clientId: clientUid, cardId, developerId: auth.developerId, appId: auth.appId,
         developerName: auth.developer.companyName, appName: auth.app.appName,
-        reason, rail: 'market_cash_api', source: 'MHT_APIS',
+        reason, rail: 'market_cash_api', source: partnerPricing ? 'API_PROVIDER' : 'MARKET_CASH_DIRECT',
+        pricingTier: partnerPricing ? 'wholesale' : 'direct', feeAction,
         cardLast4: cardNumber.slice(-4), cardBalanceAfter, developerBalanceAfter,
         adminVisible: true, createdAt: now, updatedAt: now,
       };
@@ -265,7 +283,7 @@ export const marketCashApiCardPayment = onRequest({ region: REGION }, async (req
       tx.set(db.collection('ledger_entries').doc(), { transactionId: txId, developerWalletId: developerWalletRef.id, developerId: auth.developerId, direction: 'credit', amount, currency, entryType: 'developer_sale', createdAt: now });
       tx.set(db.collection('ledger_entries').doc(), { transactionId: txId, revenueWalletId: revenueRef.id, direction: 'credit', amount: fee, currency, entryType: 'market_cash_fee', createdAt: now });
       tx.set(db.collection('notifications').doc(), { userId: clientUid, title: 'Paiement Market-Cash effectué', message: `${amount} ${currency} payé à ${auth.developer.companyName}. Frais: ${fee} ${currency}. Réf: ${reference}.`, type: 'success', category: 'transaction', transactionId: txId, read: false, createdAt: now });
-      tx.set(db.collection('audit_events').doc(), { actorId: auth.developerId, actorType: 'developer_app', action: 'MARKET_CASH_API_CARD_PAYMENT', resourceId: txId, result: 'success', clientId: clientUid, appId: auth.appId, amount, feeAmount: fee, currency, createdAt: now });
+      tx.set(db.collection('audit_events').doc(), { actorId: auth.developerId, actorType: partnerPricing ? 'api_provider_app' : 'developer_app', action: 'MARKET_CASH_API_CARD_PAYMENT', resourceId: txId, result: 'success', clientId: clientUid, appId: auth.appId, amount, feeAmount: fee, currency, pricingTier: partnerPricing ? 'wholesale' : 'direct', createdAt: now });
       return record;
     });
 
@@ -273,6 +291,7 @@ export const marketCashApiCardPayment = onRequest({ region: REGION }, async (req
       status: 'approved', approved: true, duplicate: Boolean((result as any).duplicate),
       reference: (result as any).reference, externalReference,
       amount, feeAmount: fee, totalDebited: totalDebit, currency,
+      pricingTier: partnerPricing ? 'wholesale' : 'direct',
       developer: auth.developer.companyName, app: auth.app.appName,
     });
   } catch (error: any) {
