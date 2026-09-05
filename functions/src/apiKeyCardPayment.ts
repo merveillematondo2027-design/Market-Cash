@@ -10,6 +10,7 @@ const LEGACY_PAYMENT_ENDPOINT = 'https://europe-west1-automarket-fintech.cloudfu
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 const normalize = (value: unknown) => String(value || '').trim();
+const localCardIdForUid = (uid: string) => `local_${sha256(`local-card:${uid}`).slice(0, 24)}`;
 
 function readApiKey(req: any) {
   const authorization = normalize(req.header('authorization'));
@@ -36,6 +37,28 @@ async function resolveActiveDeveloperApp(apiKey: string) {
 }
 
 /**
+ * Cardholder name is descriptive only for API-key payments. It is deliberately
+ * not used as an authorization factor. The canonical Market-Cash card record
+ * supplies the holder value before the request reaches the legacy payment
+ * engine, so spelling/casing differences from the checkout form cannot decline
+ * an otherwise valid payment. PAN + expiry + manual CVV remain authoritative.
+ */
+async function canonicalHolderForCard(cardNumber: string) {
+  if (!/^4585020002\d{6}$/.test(cardNumber)) return '';
+
+  const registry = await db.doc(`card_number_registry/${cardNumber}`).get();
+  if (!registry.exists) return '';
+
+  const uid = String(registry.data()?.userId || '').trim();
+  if (!uid) return '';
+
+  const card = await db.doc(`local_cards/${localCardIdForUid(uid)}`).get();
+  if (!card.exists) return '';
+
+  return normalize(card.data()?.cardHolder || card.data()?.cardHolderName);
+}
+
+/**
  * Compatibility endpoint for server-to-server integrations that store only
  * the private Market-Cash API key. The API key is resolved to its active
  * developer app server-side, then the request is forwarded to the canonical
@@ -58,6 +81,15 @@ export const marketCashApiCardPaymentByKey = onRequest({ region: REGION }, async
     if (!apiKey) throw new Error('UNAUTHORIZED');
 
     const appId = await resolveActiveDeveloperApp(apiKey);
+    const body = { ...(req.body || {}) } as Record<string, any>;
+    const cardNumber = normalize(body.cardNumber).replace(/\D/g, '');
+    const canonicalHolder = await canonicalHolderForCard(cardNumber);
+
+    // The typed holder remains useful to the checkout UI, but it is not a
+    // payment credential. When the card exists, use Market-Cash's canonical
+    // holder internally so a typo cannot cause HOLDER_MISMATCH.
+    if (canonicalHolder) body.cardHolder = canonicalHolder;
+
     const upstream = await fetch(LEGACY_PAYMENT_ENDPOINT, {
       method: 'POST',
       headers: {
@@ -67,7 +99,7 @@ export const marketCashApiCardPaymentByKey = onRequest({ region: REGION }, async
         Accept: 'application/json',
         'User-Agent': 'market-cash/api-key-bridge',
       },
-      body: JSON.stringify(req.body || {}),
+      body: JSON.stringify(body),
     });
 
     const text = await upstream.text();
