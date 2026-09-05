@@ -5,13 +5,14 @@ import{db}from'../../firebase/config';
 import{cardService}from'../../services/cardService';
 import{Boxes,CreditCard,HandCoins,RefreshCw,Settings2,ShieldCheck,Truck,WalletCards}from'lucide-react';
 
-interface AdminStats{totalUsers:number;clients:number;agents:number;merchants:number;pendingKyc:number;pendingUpgrades:number;pendingCardRequests:number;availableCards:number;activeDeliveries:number;activePaymentMethods:number;}
+interface AdminStats{totalUsers:number;clients:number;agents:number;merchants:number;developers:number;pendingKyc:number;pendingUpgrades:number;pendingCardRequests:number;availableCards:number;activeDeliveries:number;activePaymentMethods:number;}
+const isDeveloper=(u:any)=>u?.role==='developer'||u?.role==='api_partner'||u?.businessAccountType==='direct_developer'||u?.businessAccountType==='api_provider'||u?.developerEnabled===true;
 
 export default function AdminDashboard(){
   const navigate=useNavigate();
   const[loading,setLoading]=useState(true);
   const[refreshing,setRefreshing]=useState(false);
-  const[stats,setStats]=useState<AdminStats>({totalUsers:0,clients:0,agents:0,merchants:0,pendingKyc:0,pendingUpgrades:0,pendingCardRequests:0,availableCards:0,activeDeliveries:0,activePaymentMethods:0});
+  const[stats,setStats]=useState<AdminStats>({totalUsers:0,clients:0,agents:0,merchants:0,developers:0,pendingKyc:0,pendingUpgrades:0,pendingCardRequests:0,availableCards:0,activeDeliveries:0,activePaymentMethods:0});
 
   const load=async()=>{
     setRefreshing(true);
@@ -30,7 +31,8 @@ export default function AdminDashboard(){
         totalUsers:users.length,
         clients:users.filter(u=>u.role==='client').length,
         agents:users.filter(u=>u.role==='agent').length,
-        merchants:users.filter(u=>u.role==='marchand').length,
+        merchants:users.filter(u=>u.role==='marchand'&&!isDeveloper(u)).length,
+        developers:users.filter(isDeveloper).length,
         pendingKyc:kycSnap.docs.filter(d=>(d.data()as any).status==='pending').length,
         pendingUpgrades:upgradeSnap.docs.filter(d=>(d.data()as any).status==='pending').length,
         pendingCardRequests:requestSnap.docs.filter(d=>['pending','in_review'].includes(String((d.data()as any).status))).length,
@@ -45,8 +47,8 @@ export default function AdminDashboard(){
   useEffect(()=>{void load()},[]);
 
   const modules=[
-    {label:'Clients et portefeuilles',description:'Comptes clients, wallets et sécurité.',icon:WalletCards,to:'/admin/users',badge:stats.clients},
-    {label:'Validations',description:'KYC et demandes Agent / Marchand.',icon:ShieldCheck,to:'/admin/account-requests',badge:stats.pendingKyc+stats.pendingUpgrades},
+    {label:'Clients et portefeuilles',description:'Comptes, rôles, wallets et sécurité.',icon:WalletCards,to:'/admin/users',badge:stats.clients+stats.merchants+stats.developers},
+    {label:'Validations',description:'KYC et demandes Agent / Marchand / Developer / API.',icon:ShieldCheck,to:'/admin/account-requests',badge:stats.pendingKyc+stats.pendingUpgrades},
     {label:'Agents',description:'Points de vente, float et contrôle des comptes.',icon:HandCoins,to:'/admin/agents',badge:stats.agents},
     {label:'Demandes de cartes',description:'Traitement des commandes et validations.',icon:CreditCard,to:'/admin/requests',badge:stats.pendingCardRequests},
     {label:'Stock cartes',description:'Cartes disponibles et gestion du stock.',icon:Boxes,to:'/admin/stock',badge:stats.availableCards},
@@ -65,11 +67,12 @@ export default function AdminDashboard(){
     {loading?<div className="rounded-3xl border bg-white p-8 text-center text-sm text-slate-500">Chargement…</div>:<>
       <section className="rounded-3xl border bg-white p-4 shadow-sm">
         <div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-black text-slate-950">Vue rapide</h2><span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Statistiques</span></div>
-        <div className="grid grid-cols-4 divide-x rounded-2xl bg-slate-50 py-3">
+        <div className="grid grid-cols-5 divide-x rounded-2xl bg-slate-50 py-3">
           <Stat value={stats.totalUsers} label="Utilisateurs"/>
           <Stat value={stats.clients} label="Clients"/>
           <Stat value={stats.agents} label="Agents"/>
           <Stat value={stats.merchants} label="Marchands"/>
+          <Stat value={stats.developers} label="Developers"/>
         </div>
       </section>
 
@@ -85,4 +88,4 @@ export default function AdminDashboard(){
   </div>;
 }
 
-function Stat({value,label}:{value:number;label:string}){return <div className="px-2 text-center"><div className="text-xl font-black text-blue-950">{value}</div><div className="mt-1 truncate text-[9px] font-black uppercase tracking-wide text-slate-400">{label}</div></div>}
+function Stat({value,label}:{value:number;label:string}){return <div className="px-1 text-center"><div className="text-lg font-black text-blue-950 sm:text-xl">{value}</div><div className="mt-1 truncate text-[8px] font-black uppercase tracking-wide text-slate-400 sm:text-[9px]">{label}</div></div>}
