@@ -3,6 +3,7 @@ import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../firebase/config';
 
 export type AccountStatus = 'active' | 'suspended' | 'blocked' | 'deleted' | 'banned';
+export type MutableAccountStatus = 'active' | 'suspended' | 'blocked';
 export type WalletAdminStatus = 'active' | 'frozen';
 
 export interface AdminWalletSnapshot {
@@ -40,7 +41,12 @@ async function tryCallable<T>(fn:()=>Promise<T>,fallback:()=>Promise<T>):Promise
 
 export const adminUserService={
   getControl:async(targetUid:string)=>tryCallable(async()=>(await getControl({targetUid})).data,()=>userFallback(targetUid)),
-  setAccountStatus:async(targetUid:string,status:'active'|'suspended'|'blocked',durationMinutes?:number)=>tryCallable(async()=>(await updateControl({targetUid,action:'set_account_status',status,durationMinutes})).data,async()=>{const suspendedUntil=status==='suspended'?Date.now()+Number(durationMinutes||0)*60000:0;await updateDoc(doc(db,'users',targetUid),{accountStatus:status,suspendedUntil,accountStatusUpdatedAt:Date.now(),updatedAt:Date.now()});return{ok:true,suspendedUntil}}),
+  setAccountStatus:async(targetUid:string,status:AccountStatus,durationMinutes?:number)=>{
+    if(status==='deleted')return(await updateControl({targetUid,action:'delete_account'})).data;
+    if(status==='banned')throw new Error('Utilisez banAccount pour bannir définitivement un compte.');
+    const mutableStatus:MutableAccountStatus=status;
+    return tryCallable(async()=>(await updateControl({targetUid,action:'set_account_status',status:mutableStatus,durationMinutes})).data,async()=>{const suspendedUntil=mutableStatus==='suspended'?Date.now()+Number(durationMinutes||0)*60000:0;await updateDoc(doc(db,'users',targetUid),{accountStatus:mutableStatus,suspendedUntil,accountStatusUpdatedAt:Date.now(),updatedAt:Date.now()});return{ok:true,suspendedUntil}});
+  },
   deleteAccount:async(targetUid:string)=>(await updateControl({targetUid,action:'delete_account'})).data,
   banAccount:async(targetUid:string,reason:string)=>(await updateControl({targetUid,action:'ban_account',reason})).data,
   setWalletStatus:async(targetUid:string,currency:'USD'|'CDF'|'ALL',status:WalletAdminStatus)=>{try{return(await updateControl({targetUid,action:'set_wallet_status',currency,status})).data}catch(error){console.error('[ADMIN_WALLET_CONTROL_REQUIRES_FUNCTION]',error);throw new Error('Le contrôle financier du wallet nécessite les Cloud Functions administratives.')}},
