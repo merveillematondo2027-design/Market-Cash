@@ -2,6 +2,7 @@ import React from 'react';
 import { CheckCircle2, CircleX, Clock3, ReceiptText, X } from 'lucide-react';
 
 type Props={transaction:any;onClose:()=>void};
+type DetailRow=[string,React.ReactNode];
 
 const finite=(...values:any[])=>{for(const value of values){const n=Number(value);if(value!==null&&value!==undefined&&value!==''&&Number.isFinite(n))return n}return null};
 const money=(value:any,currency='USD')=>{const n=Number(value||0);return currency==='CDF'?`${n.toLocaleString('fr-FR',{maximumFractionDigits:0})} CDF`:`${n.toFixed(2)} USD`};
@@ -17,7 +18,7 @@ export default function TransactionDetailsModal({transaction:t,onClose}:Props){
   const balanceAfter=finite(t?.balanceAfter,t?.cardBalanceAfter,t?.walletBalanceAfter,t?.clientBalanceAfter,t?.senderBalanceAfter);
   const beneficiary=t?.merchantName||t?.developerName||t?.recipientName||t?.beneficiaryName||t?.clientName||'';
   const failure=t?.failureCode||t?.declineCode||t?.errorCode||'';
-  const rows:[string,React.ReactNode][]=[
+  const rawRows:DetailRow[]=[
     ['Référence',t?.reference||'—'],
     ['Transaction',t?.id||t?.transactionId||'—'],
     ['Référence externe',t?.externalReference||''],
@@ -36,7 +37,8 @@ export default function TransactionDetailsModal({transaction:t,onClose}:Props){
     ['Solde avant',balanceBefore!==null?money(balanceBefore,currency):''],
     ['Solde après opération',balanceAfter!==null?money(balanceAfter,currency):''],
     ['Date et heure',t?.createdAt?new Date(Number(t.createdAt)).toLocaleString('fr-FR'):'—'],
-  ].filter(([,value])=>value!==''&&value!==null&&value!==undefined);
+  ];
+  const rows=rawRows.filter(([,value])=>value!==''&&value!==null&&value!==undefined);
 
   return <div className="fixed inset-0 z-[140] flex items-end justify-center bg-slate-950/55 p-0 sm:items-center sm:p-4" onClick={onClose}>
     <section onClick={e=>e.stopPropagation()} className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-[2rem] bg-white shadow-2xl sm:rounded-[2rem]">
