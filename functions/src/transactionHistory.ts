@@ -11,16 +11,24 @@ function requireAuth(request:any){const uid=String(request.auth?.uid||'');if(!ui
 function enrichForViewer(data:any,uid:string){
   const item={...data};
   const first=(...values:any[])=>values.find(v=>v!==undefined&&v!==null&&v!==''&&Number.isFinite(Number(v)));
+  const clientSide=String(item.clientId||item.userId||'')===uid;
+  const senderSide=String(item.senderId||'')===uid;
+  const recipientSide=String(item.recipientId||'')===uid;
   if(item.balanceAfter===undefined){
-    if(String(item.clientId||item.userId||'')===uid)item.balanceAfter=first(item.cardBalanceAfter,item.clientBalanceAfter,item.walletBalanceAfter);
-    else if(String(item.senderId||'')===uid)item.balanceAfter=first(item.senderBalanceAfter,item.walletBalanceAfter);
-    else if(String(item.recipientId||'')===uid)item.balanceAfter=first(item.recipientBalanceAfter,item.walletBalanceAfter);
+    if(clientSide)item.balanceAfter=first(item.cardBalanceAfter,item.clientBalanceAfter,item.walletBalanceAfter);
+    else if(senderSide)item.balanceAfter=first(item.senderBalanceAfter,item.walletBalanceAfter);
+    else if(recipientSide)item.balanceAfter=first(item.recipientBalanceAfter,item.walletBalanceAfter);
   }
   if(item.balanceBefore===undefined){
-    if(String(item.clientId||item.userId||'')===uid)item.balanceBefore=first(item.cardBalanceBefore,item.clientBalanceBefore,item.walletBalanceBefore);
-    else if(String(item.senderId||'')===uid)item.balanceBefore=first(item.senderBalanceBefore,item.walletBalanceBefore);
-    else if(String(item.recipientId||'')===uid)item.balanceBefore=first(item.recipientBalanceBefore,item.walletBalanceBefore);
+    if(clientSide)item.balanceBefore=first(item.cardBalanceBefore,item.clientBalanceBefore,item.walletBalanceBefore);
+    else if(senderSide)item.balanceBefore=first(item.senderBalanceBefore,item.walletBalanceBefore);
+    else if(recipientSide)item.balanceBefore=first(item.recipientBalanceBefore,item.walletBalanceBefore);
   }
+  if(item.balanceBefore===undefined&&clientSide&&item.balanceAfter!==undefined&&String(item.status||'').toLowerCase()==='settled'){
+    const debit=first(item.totalDebited,item.debitedAmount);
+    if(debit!==undefined)item.balanceBefore=Math.round((Number(item.balanceAfter)+Number(debit))*100)/100;
+  }
+  if(item.balanceBefore===undefined&&item.balanceAfter!==undefined&&['failed','declined','rejected','cancelled'].includes(String(item.status||'').toLowerCase()))item.balanceBefore=item.balanceAfter;
   return item;
 }
 
