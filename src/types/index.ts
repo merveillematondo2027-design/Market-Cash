@@ -1,6 +1,7 @@
 export type UserRole = 'admin_general' | 'agent_administratif' | 'chef_agence' | 'designer_graphique' | 'livreur' | 'client' | 'agent' | 'marchand';
 export type KycStatus = 'not_started' | 'pending' | 'approved' | 'rejected';
-export type AccountUpgradeType = 'agent' | 'marchand';
+export type AccountUpgradeType = 'agent' | 'marchand' | 'developer_direct' | 'api_partner';
+export type BusinessAccountType = 'merchant' | 'agent' | 'direct_developer' | 'api_provider';
 export type AccountStatus = 'active' | 'suspended' | 'blocked';
 
 export interface User {
@@ -10,6 +11,9 @@ export interface User {
   phone: string;
   avatar: string;
   role: UserRole;
+  businessAccountType?: BusinessAccountType;
+  developerEnabled?: boolean;
+  apiProviderEnabled?: boolean;
   agencyId?: string;
   agencyName?: string;
   pinHash: string;
@@ -67,6 +71,8 @@ export interface AccountUpgradeRequest {
   floatEstimate?: string;
   openingHours?: string;
   reason?: string;
+  developerId?: string;
+  website?: string;
   status: 'pending' | 'approved' | 'rejected';
   createdAt: number;
   updatedAt: number;
