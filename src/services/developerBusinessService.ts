@@ -8,7 +8,10 @@ export interface DeveloperDashboard{developer:any|null;apps:any[];wallets:Record
 const call=<T=any>(name:string,data?:any)=>httpsCallable<any,T>(functions,name)(data).then(r=>r.data);
 export const developerBusinessService={
   apply:(input:{companyName:string;contactEmail:string;businessType:DeveloperBusinessType;website?:string;reason?:string})=>call<{developerId:string;status:DeveloperAccountStatus;businessType:DeveloperBusinessType}>('createDeveloperAccount',input),
-  dashboard:()=>call<DeveloperDashboard>('getMyDeveloperDashboard'),
+  dashboard:async()=>{
+    try{await call('syncMyDeveloperRole')}catch(error){console.warn('[DEVELOPER_ROLE_SYNC_DEFERRED]',error)}
+    return call<DeveloperDashboard>('getMyDeveloperDashboard');
+  },
   access:()=>call<any>('getMyBusinessAccess'),
   registerApp:(appName:string)=>call<{appId:string;apiKey:string;appName:string;note:string}>('registerDeveloperApp',{appName}),
   updateAppSettings:(input:{appId:string;apiEnabled:boolean;enabledFeatures:string[];allowedCurrencies:string[]})=>call<{ok:boolean;appId:string;status:string;apiEnabled:boolean;enabledFeatures:string[];allowedCurrencies:string[]}>('updateDeveloperAppSettings',input),
