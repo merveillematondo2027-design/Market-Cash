@@ -11,7 +11,7 @@ export default function BusinessLayout(){
   const inferredMode=role==='api_partner'?'api_provider':role==='developer'?'direct_developer':user?.businessAccountType||'merchant';
   const mode=inferredMode;const developer=role==='developer'||role==='api_partner'||mode==='direct_developer'||mode==='api_provider';
   const nav=developer?[{name:mode==='api_provider'||role==='api_partner'?'Partner':'Console',path:'/business/developer',icon:Code2},{name:'Profil',path:'/business/profile',icon:User}]:[
-    {name:'Accueil',path:'/business/home',icon:Home},{name:'Encaisser',path:'/business/collect',icon:QrCode},{name:'Historique',path:'/business/history',icon:History},{name:'Profil',path:'/business/profile',icon:User},
+    {name:'Accueil',path:'/business/home',icon:Home},{name:'Encaisser',path:'/business/collect',icon:QrCode},{name:'Transactions',path:'/business/history',icon:History},{name:'Profil',path:'/business/profile',icon:User},
   ];
   const home=developer?'/business/developer':'/business/home';
   return <div className="min-h-screen bg-slate-50 text-slate-800">
