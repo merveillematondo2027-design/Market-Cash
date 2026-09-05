@@ -80,9 +80,24 @@ jobs:
           echo 'Changed function sources:'
           printf '%s\n' "${function_changes[@]:-}"
 
+          bridge_set=0
+          if [ "${#function_changes[@]}" -eq 0 ]; then
+            # Workflow-only/manual runs are used as a fast recovery path for the
+            # MUNGWELE IA server-to-server Market-Cash bridge.
+            bridge_set=1
+          else
+            bridge_set=1
+            for file in "${function_changes[@]}"; do
+              case "$file" in
+                functions/src/apiKeyCardPayment.ts|functions/src/entry.ts) ;;
+                *) bridge_set=0 ;;
+              esac
+            done
+          fi
+
           priority_set=0
           if [ "${#function_changes[@]}" -eq 0 ]; then
-            priority_set=1
+            priority_set=0
           else
             priority_set=1
             for file in "${function_changes[@]}"; do
@@ -97,7 +112,13 @@ jobs:
           # that the GitHub deployer is not allowed to grant. The application does
           # not depend on them for interactive recovery because the callable local
           # card endpoints self-heal verified historical accounts.
-          if [ "$priority_set" -eq 1 ]; then
+          if [ "$bridge_set" -eq 1 ]; then
+            cat > /tmp/market-cash-functions.txt <<'EOF'
+          marketCashApiCardPaymentByKey
+          EOF
+            echo 'Fast Market-Cash API-key payment bridge deployment selected.'
+            echo '1' > /tmp/market-cash-batch-size.txt
+          elif [ "$priority_set" -eq 1 ]; then
             cat > /tmp/market-cash-functions.txt <<'EOF'
           verifyApplicationSecret
           changeApplicationPin
