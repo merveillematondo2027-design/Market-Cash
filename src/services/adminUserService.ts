@@ -1,6 +1,7 @@
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../firebase/config';
+import type { UserRole } from '../types';
 
 export type AccountStatus = 'active' | 'suspended' | 'blocked' | 'deleted' | 'banned';
 export type MutableAccountStatus = 'active' | 'suspended' | 'blocked';
@@ -29,7 +30,7 @@ export interface AdminUserControlSnapshot {
 }
 
 const getControl = httpsCallable<{targetUid:string},AdminUserControlSnapshot>(functions,'adminGetUserControl');
-const updateControl = httpsCallable<Record<string,unknown>,{ok:boolean;changed?:number;suspendedUntil?:number}>(functions,'adminUpdateUserControl');
+const updateControl = httpsCallable<Record<string,unknown>,{ok:boolean;changed?:number;suspendedUntil?:number;role?:UserRole;displayName?:string;phone?:string}>(functions,'adminUpdateUserControl');
 async function hashPin(value:string){const encoded=new TextEncoder().encode(value);const buffer=await crypto.subtle.digest('SHA-256',encoded);return Array.from(new Uint8Array(buffer)).map(b=>b.toString(16).padStart(2,'0')).join('')}
 
 async function userFallback(targetUid:string):Promise<AdminUserControlSnapshot>{
@@ -41,6 +42,8 @@ async function tryCallable<T>(fn:()=>Promise<T>,fallback:()=>Promise<T>):Promise
 
 export const adminUserService={
   getControl:async(targetUid:string)=>tryCallable(async()=>(await getControl({targetUid})).data,()=>userFallback(targetUid)),
+  setIdentity:async(targetUid:string,displayName:string,phone:string)=>(await updateControl({targetUid,action:'set_identity',displayName,phone})).data,
+  setRole:async(targetUid:string,role:UserRole,agencyName='')=>(await updateControl({targetUid,action:'set_role',role,agencyName})).data,
   setAccountStatus:async(targetUid:string,status:AccountStatus,durationMinutes?:number)=>{
     if(status==='deleted')return(await updateControl({targetUid,action:'delete_account'})).data;
     if(status==='banned')throw new Error('Utilisez banAccount pour bannir définitivement un compte.');
