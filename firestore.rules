@@ -6,7 +6,7 @@ service cloud.firestore {
     function userExists(){ return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
     function getUserRole(){ return userExists() ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role : null; }
     function isBootstrapAdminEmail(){ return isSignedIn() && request.auth.token.email == 'merveillematondo2027@gmail.com'; }
-    function isOfficialRole(role){ return role in ['client','agent','marchand','agent_administratif','admin_general','chef_agence','designer_graphique','livreur']; }
+    function isOfficialRole(role){ return role in ['client','agent','marchand','developer','api_partner','agent_administratif','admin_general','chef_agence','designer_graphique','livreur']; }
     function isAdminGeneral(){ return isSignedIn() && (isBootstrapAdminEmail() || getUserRole() == 'admin_general'); }
     function isAgentAdministratif(){ return isSignedIn() && getUserRole() == 'agent_administratif'; }
     function isOperationsAdmin(){ return isAdminGeneral() || isAgentAdministratif(); }
