@@ -148,7 +148,7 @@ export const agentWalletService = {
   redeemWithdrawalAuthorization: async(input:{code:string;pin:string;idempotencyKey:string}) => (await call<typeof input,{ok:boolean;reference:string;transactionId:string;amount:number;currency:WalletCurrency}>('redeemWithdrawalAuthorization')(input)).data,
 
   ensureLocalCard: async() => {
-    const created=(await call<Record<string,never>,{ok:boolean;cardId:string;cardIdentifier:string;expiryStart?:string;expiryEnd?:string}>('activateLocalMarketCashCardV2')({})).data;
+    const created=(await call<Record<string,never>,{ok:boolean;cardId:string;cardIdentifier:string}>('ensureLocalMarketCashCard')({})).data;
     await call<Record<string,never>,{ok:boolean;cardId:string;expiryStart:string;expiryEnd:string;cvvVersion:number}>('syncLocalCardSecurityProfile')({});
     return created;
   },
