@@ -10,9 +10,13 @@ const adminAuth = getAuth();
 const REGION = 'europe-west1';
 const CURRENCIES = ['USD', 'CDF'] as const;
 type Currency = typeof CURRENCIES[number];
+const OFFICIAL_ROLES=['client','agent','marchand','developer','api_partner','agent_administratif','admin_general','chef_agence','designer_graphique','livreur'] as const;
+type OfficialRole=typeof OFFICIAL_ROLES[number];
 const sha256=(value:string)=>createHash('sha256').update(value).digest('hex');
 const normalizeEmail=(value:any)=>String(value||'').trim().toLowerCase();
+const clean=(value:any)=>String(value??'').trim();
 const banId=(email:string)=>sha256(normalizeEmail(email));
+const developerIdForUid=(uid:string)=>`DEV-${sha256(`developer:${uid}`).slice(0,10).toUpperCase()}`;
 
 const requireAuth = (request:any) => {
   const uid = request.auth?.uid as string | undefined;
@@ -69,8 +73,53 @@ export const adminUpdateUserControl = onCall({region:REGION}, async(request) => 
   const targetUid = String(request.data?.targetUid || '').trim();
   const action = String(request.data?.action || '').trim();
   const target = await requireTarget(targetUid);const targetData = target.data() || {};
-  if (targetUid === actorId && ['set_account_status','reset_pin','delete_account','ban_account'].includes(action)) throw new HttpsError('failed-precondition','Cette action de sécurité ne peut pas être appliquée à votre propre compte depuis cette page.');
+  if (targetUid === actorId && ['set_account_status','reset_pin','delete_account','ban_account','set_role'].includes(action)) throw new HttpsError('failed-precondition','Cette action de sécurité ne peut pas être appliquée à votre propre compte depuis cette page.');
   const now = Date.now();
+
+  if(action==='set_identity'){
+    const displayName=clean(request.data?.displayName).slice(0,120);
+    const phone=clean(request.data?.phone).slice(0,40);
+    if(displayName.length<2)throw new HttpsError('invalid-argument','Le nom complet est requis.');
+    await target.ref.update({displayName,phone,updatedAt:now});
+    await audit(actorId,targetUid,'ADMIN_USER_IDENTITY_UPDATED',{displayNameChanged:displayName!==clean(targetData.displayName),phoneChanged:phone!==clean(targetData.phone)});
+    return{ok:true,displayName,phone};
+  }
+
+  if(action==='set_role'){
+    const role=clean(request.data?.role) as OfficialRole;
+    if(!OFFICIAL_ROLES.includes(role))throw new HttpsError('invalid-argument','Rôle Market-Cash invalide.');
+    const agencyName=clean(request.data?.agencyName).slice(0,120);
+    if(['chef_agence','livreur','designer_graphique'].includes(role)&&!agencyName)throw new HttpsError('invalid-argument','Agence ou secteur requis pour ce rôle.');
+
+    const updates:Record<string,unknown>={role,updatedAt:now};
+    if(['chef_agence','livreur','designer_graphique'].includes(role)){
+      updates.agencyId=agencyName;updates.agencyName=agencyName;
+    }else{
+      updates.agencyId=null;updates.agencyName=null;
+    }
+
+    if(role==='developer'||role==='api_partner'){
+      const developerId=developerIdForUid(targetUid);
+      const developerSnap=await db.doc(`developer_accounts/${developerId}`).get();
+      if(!developerSnap.exists||developerSnap.data()?.status!=='active')throw new HttpsError('failed-precondition','Un compte Developer approuvé est requis avant d’attribuer ce rôle.');
+      const businessType=developerSnap.data()?.businessType==='api_provider'?'api_provider':'direct_developer';
+      const expectedRole=businessType==='api_provider'?'api_partner':'developer';
+      if(role!==expectedRole)throw new HttpsError('failed-precondition',businessType==='api_provider'?'Ce compte est validé comme Partenaire API.':'Ce compte est validé comme Développeur direct.');
+      updates.businessAccountType=businessType;
+      updates.developerEnabled=true;
+      updates.apiProviderEnabled=businessType==='api_provider';
+    }else if(role==='marchand'){
+      updates.businessAccountType='merchant';updates.developerEnabled=false;updates.apiProviderEnabled=false;
+    }else if(role==='agent'){
+      updates.businessAccountType='agent';updates.developerEnabled=false;updates.apiProviderEnabled=false;
+    }else{
+      updates.businessAccountType=null;updates.developerEnabled=false;updates.apiProviderEnabled=false;
+    }
+
+    await target.ref.set(updates,{merge:true});
+    await audit(actorId,targetUid,'ADMIN_USER_ROLE_CHANGED',{previousRole:targetData.role||null,role,agencyName:agencyName||null});
+    return{ok:true,role};
+  }
 
   if (action === 'set_account_status') {
     const status = String(request.data?.status || '');
