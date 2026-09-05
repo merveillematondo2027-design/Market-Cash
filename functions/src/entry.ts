@@ -46,4 +46,5 @@ export * from './identityV2';
 export * from './cardProvisioningV2';
 export * from './visaSecurity';
 export * from './developerPayments';
+export * from './developerAppSettings';
 export * from './businessAccounts';
