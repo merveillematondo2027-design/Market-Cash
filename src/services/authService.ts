@@ -1,11 +1,20 @@
 import { logService } from './logService';
-import { auth, db, googleProvider } from '../firebase/config';
+import { auth, db, googleProvider, functions } from '../firebase/config';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, signOut, updateProfile, User as FirebaseUser } from 'firebase/auth';
+import { httpsCallable } from 'firebase/functions';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { User, UserRole } from '../types';
 import { removeUndefined } from '../lib/firestoreUtils';
 
 export const ADMIN_EMAIL='merveillematondo2027@gmail.com';
+const checkEmailEligibility=httpsCallable<{email:string},{allowed:boolean}>(functions,'checkEmailEligibility');
+
+async function assertEmailAllowed(email:string){
+  const clean=email.trim().toLowerCase();
+  if(!clean)return;
+  try{const result=await checkEmailEligibility({email:clean});if(!result.data.allowed){const error:any=new Error('Cette adresse e-mail a été bannie définitivement de Market-Cash.');error.code='auth/market-cash-banned';throw error}}
+  catch(error:any){if(error?.code==='auth/market-cash-banned'||String(error?.message||'').includes('bannie définitivement'))throw error;console.warn('[EMAIL_BAN_CHECK_UNAVAILABLE]',error)}
+}
 
 function isFirestoreAccessError(error:any){
   const code=String(error?.code||'');
@@ -36,6 +45,7 @@ export function formatAuthError(error:any):string{
   const code=error.code||'';const message=error.message||'';
   console.error('[AUTH_ERROR_DETAILS]',{code,message,error});
   switch(code){
+    case'auth/market-cash-banned':return'Cette adresse e-mail est bannie définitivement de Market-Cash.';
     case'auth/email-already-in-use':return'Cette adresse email est déjà associée à un compte. Veuillez vous connecter.';
     case'auth/invalid-email':return"L'adresse email saisie n'est pas valide.";
     case'auth/weak-password':return'Le mot de passe doit comporter au moins 6 caractères.';
@@ -57,6 +67,7 @@ const resolvingUsers=new Map<string,Promise<User>>();
 export const authService={
   async resolveUser(firebaseUser:FirebaseUser,additionalData:Partial<User>={}):Promise<User>{
     const uid=firebaseUser.uid;const email=(firebaseUser.email||'').trim();
+    await assertEmailAllowed(email);
     if(Object.keys(additionalData).length===0&&resolvingUsers.has(uid))return resolvingUsers.get(uid)!;
     const resolvePromise=(async()=>{
       logService.info('AUTH','USER_PROFILE_LOAD_START','Début du chargement du profil utilisateur',{userId:uid,userEmail:email});
@@ -76,7 +87,9 @@ export const authService={
         }
 
         const stored=snapshot.data() as User;
+        const expiredSuspension=stored.accountStatus==='suspended'&&Number(stored.suspendedUntil||0)>0&&Number(stored.suspendedUntil)<=Date.now();
         const data:User={...buildSessionUser(firebaseUser,additionalData),...stored,uid:stored.uid||uid,email:stored.email||email,displayName:stored.displayName||firebaseUser.displayName||email.split('@')[0]||'Utilisateur',phone:stored.phone||firebaseUser.phoneNumber||'',avatar:stored.avatar||firebaseUser.photoURL||'',pinHash:stored.pinHash||'',kycStatus:stored.kycStatus||'not_started',createdAt:stored.createdAt||Date.now(),updatedAt:stored.updatedAt||Date.now()};
+        if(expiredSuspension){data.accountStatus='active';data.suspendedUntil=0;data.updatedAt=Date.now();try{await setDoc(userRef,{accountStatus:'active',suspendedUntil:0,updatedAt:data.updatedAt},{merge:true})}catch{}}
 
         if(email.toLowerCase()===ADMIN_EMAIL.toLowerCase()&&data.role!=='admin_general'){
           data.role='admin_general';data.updatedAt=Date.now();
@@ -97,6 +110,7 @@ export const authService={
 
   async register(email:string,password:string,displayName:string,phone:string){
     const cleanEmail=email.trim();
+    await assertEmailAllowed(cleanEmail);
     const result=await createUserWithEmailAndPassword(auth,cleanEmail,password);
     if(displayName.trim())try{await updateProfile(result.user,{displayName:displayName.trim()})}catch{}
     const newUser=buildSessionUser(result.user,{displayName:displayName.trim()||'Client',phone:phone.trim()||''});
@@ -110,10 +124,11 @@ export const authService={
   },
 
   async login(email:string,password:string){
-    const result=await signInWithEmailAndPassword(auth,email.trim(),password);
+    const cleanEmail=email.trim();await assertEmailAllowed(cleanEmail);
+    const result=await signInWithEmailAndPassword(auth,cleanEmail,password);
     const userDoc=await this.resolveUser(result.user);
     return{firebaseUser:result.user,user:userDoc};
   },
-  async loginWithGoogle(){googleProvider.setCustomParameters({prompt:'select_account'});const result=await signInWithPopup(auth,googleProvider);const userDoc=await this.resolveUser(result.user);return{firebaseUser:result.user,user:userDoc}},
+  async loginWithGoogle(){googleProvider.setCustomParameters({prompt:'select_account'});const result=await signInWithPopup(auth,googleProvider);try{await assertEmailAllowed(result.user.email||'')}catch(error){await signOut(auth);throw error}const userDoc=await this.resolveUser(result.user);return{firebaseUser:result.user,user:userDoc}},
   async logout(){await signOut(auth);if(typeof window!=='undefined'){try{localStorage.removeItem('market_cash_user');sessionStorage.clear()}catch{}}}
 };
