@@ -9,5 +9,8 @@ const call=<T=any>(name:string,data?:any)=>httpsCallable<any,T>(functions,name)(
 export const developerBusinessService={
   apply:(input:{companyName:string;contactEmail:string;businessType:DeveloperBusinessType;website?:string;reason?:string})=>call<{developerId:string;status:DeveloperAccountStatus;businessType:DeveloperBusinessType}>('createDeveloperAccount',input),
   dashboard:()=>call<DeveloperDashboard>('getMyDeveloperDashboard'),
+  access:()=>call<any>('getMyBusinessAccess'),
   registerApp:(appName:string)=>call<{appId:string;apiKey:string;appName:string;note:string}>('registerDeveloperApp',{appName}),
+  createSubDeveloper:(input:{companyName:string;contactEmail:string;externalReference?:string})=>call<{subDeveloperId:string;status:string}>('partnerCreateSubDeveloper',input),
+  listSubDevelopers:()=>call<{developers:any[]}>('partnerListSubDevelopers'),
 };
