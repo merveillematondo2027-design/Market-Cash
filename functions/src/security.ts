@@ -126,8 +126,7 @@ function generateCvv(previous = '') {
  * user_security is server-only under Firestore rules.
  */
 export async function ensureMarketCashLocalCvv(uid: string) {
-  const user = await activeClient(uid);
-  if (user.data()?.kycStatus !== 'approved') throw new HttpsError('failed-precondition', 'Vérification KYC requise.');
+  await activeClient(uid);
   const ref = securityRefForUid(uid);
   const snap = await ref.get();
   const existing = String(snap.data()?.localTransactionCvv || '');
