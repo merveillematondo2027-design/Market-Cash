@@ -1,14 +1,18 @@
 import { createHash } from 'node:crypto';
 import { getApps, initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
 if (!getApps().length) initializeApp();
 const db = getFirestore();
+const adminAuth = getAuth();
 const REGION = 'europe-west1';
 const CURRENCIES = ['USD', 'CDF'] as const;
 type Currency = typeof CURRENCIES[number];
 const sha256=(value:string)=>createHash('sha256').update(value).digest('hex');
+const normalizeEmail=(value:any)=>String(value||'').trim().toLowerCase();
+const banId=(email:string)=>sha256(normalizeEmail(email));
 
 const requireAuth = (request:any) => {
   const uid = request.auth?.uid as string | undefined;
@@ -34,6 +38,19 @@ async function audit(actorId:string,targetUid:string,action:string,metadata:Reco
   await db.collection('audit_events').add({actorId,targetUserId:targetUid,action,result:'success',metadata,createdAt:Date.now()});
 }
 
+async function freezeWallets(targetUid:string,now:number){
+  const batch=db.batch();let changed=0;
+  for(const currency of CURRENCIES){const ref=db.doc(`wallet_accounts/${walletId(targetUid,currency)}`);if((await ref.get()).exists){batch.update(ref,{status:'frozen',updatedAt:now});changed++}}
+  if(changed)await batch.commit();
+}
+
+export const checkEmailEligibility = onCall({region:REGION}, async(request) => {
+  const email=normalizeEmail(request.data?.email);
+  if(!email || !email.includes('@')) throw new HttpsError('invalid-argument','Adresse e-mail invalide.');
+  const snap=await db.doc(`banned_emails/${banId(email)}`).get();
+  return {allowed:!snap.exists};
+});
+
 export const adminGetUserControl = onCall({region:REGION}, async(request) => {
   const actorId = requireAuth(request);await requireAdmin(actorId);
   const targetUid = String(request.data?.targetUid || '').trim();
@@ -44,7 +61,7 @@ export const adminGetUserControl = onCall({region:REGION}, async(request) => {
     const data = snap.data();
     wallets[currency] = data ? {id:snap.id,currency,status:data.status||'active',availableBalance:Number(data.availableBalance||0),ledgerBalance:Number(data.ledgerBalance||0),heldBalance:Number(data.heldBalance||0),rechargeNumber:data.rechargeNumber||'',marketCashId:data.marketCashId||'',updatedAt:Number(data.updatedAt||0)} : null;
   }
-  return {accountStatus:user.accountStatus||'active',adminNote:user.adminNote||'',kycStatus:user.kycStatus||'not_started',securityResetAt:Number(user.securityResetAt||0),mustChangePin:Boolean(user.mustChangePin),wallets};
+  return {accountStatus:user.accountStatus||'active',suspendedUntil:Number(user.suspendedUntil||0),adminNote:user.adminNote||'',kycStatus:user.kycStatus||'not_started',securityResetAt:Number(user.securityResetAt||0),mustChangePin:Boolean(user.mustChangePin),wallets};
 });
 
 export const adminUpdateUserControl = onCall({region:REGION}, async(request) => {
@@ -52,19 +69,41 @@ export const adminUpdateUserControl = onCall({region:REGION}, async(request) => 
   const targetUid = String(request.data?.targetUid || '').trim();
   const action = String(request.data?.action || '').trim();
   const target = await requireTarget(targetUid);const targetData = target.data() || {};
-  if (targetUid === actorId && ['set_account_status','reset_pin'].includes(action)) throw new HttpsError('failed-precondition','Cette action de sécurité ne peut pas être appliquée à votre propre compte depuis cette page.');
+  if (targetUid === actorId && ['set_account_status','reset_pin','delete_account','ban_account'].includes(action)) throw new HttpsError('failed-precondition','Cette action de sécurité ne peut pas être appliquée à votre propre compte depuis cette page.');
   const now = Date.now();
 
   if (action === 'set_account_status') {
     const status = String(request.data?.status || '');
     if (!['active','suspended','blocked'].includes(status)) throw new HttpsError('invalid-argument','Statut de compte invalide.');
-    await target.ref.update({accountStatus:status,accountStatusUpdatedAt:now,accountStatusUpdatedBy:actorId,updatedAt:now});
-    if (status !== 'active') {
-      const batch = db.batch();
-      for (const currency of CURRENCIES) {const ref=db.doc(`wallet_accounts/${walletId(targetUid,currency)}`);if((await ref.get()).exists)batch.update(ref,{status:'frozen',updatedAt:now})}
-      await batch.commit();
+    let suspendedUntil=0;
+    if(status==='suspended'){
+      const durationMinutes=Number(request.data?.durationMinutes||0);
+      if(!Number.isFinite(durationMinutes)||durationMinutes<1||durationMinutes>525600)throw new HttpsError('invalid-argument','Durée de suspension invalide.');
+      suspendedUntil=now+Math.round(durationMinutes*60000);
     }
-    await audit(actorId,targetUid,'ADMIN_ACCOUNT_STATUS_CHANGED',{status,previous:targetData.accountStatus||'active'});return{ok:true};
+    await target.ref.update({accountStatus:status,suspendedUntil:status==='suspended'?suspendedUntil:0,accountStatusUpdatedAt:now,accountStatusUpdatedBy:actorId,updatedAt:now});
+    if (status !== 'active') await freezeWallets(targetUid,now);
+    await audit(actorId,targetUid,'ADMIN_ACCOUNT_STATUS_CHANGED',{status,suspendedUntil,previous:targetData.accountStatus||'active'});return{ok:true,suspendedUntil};
+  }
+
+  if(action==='delete_account'){
+    const email=normalizeEmail(targetData.email);
+    await freezeWallets(targetUid,now);
+    try{await adminAuth.deleteUser(targetUid)}catch(error:any){if(error?.code!=='auth/user-not-found')throw error}
+    await target.ref.set({accountStatus:'deleted',deletedAt:now,deletedBy:actorId,suspendedUntil:0,updatedAt:now},{merge:true});
+    await audit(actorId,targetUid,'ADMIN_ACCOUNT_DELETED',{email,canRecreate:true});
+    return{ok:true};
+  }
+
+  if(action==='ban_account'){
+    const email=normalizeEmail(targetData.email);
+    if(!email)throw new HttpsError('failed-precondition','Ce compte ne possède pas d’adresse e-mail exploitable.');
+    await db.doc(`banned_emails/${banId(email)}`).set({emailHash:banId(email),emailMasked:`${email.slice(0,2)}***@${email.split('@')[1]||''}`,reason:String(request.data?.reason||'').trim().slice(0,500),bannedUserId:targetUid,bannedAt:now,bannedBy:actorId,permanent:true},{merge:true});
+    await freezeWallets(targetUid,now);
+    try{await adminAuth.updateUser(targetUid,{disabled:true})}catch(error:any){if(error?.code!=='auth/user-not-found')throw error}
+    await target.ref.set({accountStatus:'banned',bannedAt:now,bannedBy:actorId,suspendedUntil:0,updatedAt:now},{merge:true});
+    await audit(actorId,targetUid,'ADMIN_ACCOUNT_PERMANENTLY_BANNED',{emailHash:banId(email)});
+    return{ok:true};
   }
 
   if (action === 'set_wallet_status') {
