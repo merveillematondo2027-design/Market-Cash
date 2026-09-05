@@ -2,7 +2,7 @@ import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../firebase/config';
 
-export type AccountStatus = 'active' | 'suspended' | 'blocked';
+export type AccountStatus = 'active' | 'suspended' | 'blocked' | 'deleted' | 'banned';
 export type WalletAdminStatus = 'active' | 'frozen';
 
 export interface AdminWalletSnapshot {
@@ -19,6 +19,7 @@ export interface AdminWalletSnapshot {
 
 export interface AdminUserControlSnapshot {
   accountStatus:AccountStatus;
+  suspendedUntil:number;
   adminNote:string;
   kycStatus:string;
   securityResetAt:number;
@@ -27,19 +28,21 @@ export interface AdminUserControlSnapshot {
 }
 
 const getControl = httpsCallable<{targetUid:string},AdminUserControlSnapshot>(functions,'adminGetUserControl');
-const updateControl = httpsCallable<Record<string,unknown>,{ok:boolean;changed?:number}>(functions,'adminUpdateUserControl');
+const updateControl = httpsCallable<Record<string,unknown>,{ok:boolean;changed?:number;suspendedUntil?:number}>(functions,'adminUpdateUserControl');
 async function hashPin(value:string){const encoded=new TextEncoder().encode(value);const buffer=await crypto.subtle.digest('SHA-256',encoded);return Array.from(new Uint8Array(buffer)).map(b=>b.toString(16).padStart(2,'0')).join('')}
 
 async function userFallback(targetUid:string):Promise<AdminUserControlSnapshot>{
   const snap=await getDoc(doc(db,'users',targetUid));if(!snap.exists())throw new Error('Utilisateur introuvable.');const u=snap.data();
-  return{accountStatus:(u.accountStatus||'active')as AccountStatus,adminNote:String(u.adminNote||''),kycStatus:String(u.kycStatus||'not_started'),securityResetAt:Number(u.securityResetAt||0),mustChangePin:Boolean(u.mustChangePin),wallets:{USD:null,CDF:null}};
+  return{accountStatus:(u.accountStatus||'active')as AccountStatus,suspendedUntil:Number(u.suspendedUntil||0),adminNote:String(u.adminNote||''),kycStatus:String(u.kycStatus||'not_started'),securityResetAt:Number(u.securityResetAt||0),mustChangePin:Boolean(u.mustChangePin),wallets:{USD:null,CDF:null}};
 }
 
 async function tryCallable<T>(fn:()=>Promise<T>,fallback:()=>Promise<T>):Promise<T>{try{return await fn()}catch(error){console.warn('[ADMIN_CONTROL_FUNCTION_FALLBACK]',error);return fallback()}}
 
 export const adminUserService={
   getControl:async(targetUid:string)=>tryCallable(async()=>(await getControl({targetUid})).data,()=>userFallback(targetUid)),
-  setAccountStatus:async(targetUid:string,status:AccountStatus)=>tryCallable(async()=>(await updateControl({targetUid,action:'set_account_status',status})).data,async()=>{await updateDoc(doc(db,'users',targetUid),{accountStatus:status,accountStatusUpdatedAt:Date.now(),updatedAt:Date.now()});return{ok:true}}),
+  setAccountStatus:async(targetUid:string,status:'active'|'suspended'|'blocked',durationMinutes?:number)=>tryCallable(async()=>(await updateControl({targetUid,action:'set_account_status',status,durationMinutes})).data,async()=>{const suspendedUntil=status==='suspended'?Date.now()+Number(durationMinutes||0)*60000:0;await updateDoc(doc(db,'users',targetUid),{accountStatus:status,suspendedUntil,accountStatusUpdatedAt:Date.now(),updatedAt:Date.now()});return{ok:true,suspendedUntil}}),
+  deleteAccount:async(targetUid:string)=>(await updateControl({targetUid,action:'delete_account'})).data,
+  banAccount:async(targetUid:string,reason:string)=>(await updateControl({targetUid,action:'ban_account',reason})).data,
   setWalletStatus:async(targetUid:string,currency:'USD'|'CDF'|'ALL',status:WalletAdminStatus)=>{try{return(await updateControl({targetUid,action:'set_wallet_status',currency,status})).data}catch(error){console.error('[ADMIN_WALLET_CONTROL_REQUIRES_FUNCTION]',error);throw new Error('Le contrôle financier du wallet nécessite les Cloud Functions administratives.')}},
   resetPin:async(targetUid:string)=>tryCallable(
     async()=>(await updateControl({targetUid,action:'reset_pin'})).data,
