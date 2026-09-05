@@ -7,7 +7,7 @@ import{useAuthStore}from'../../store/authStore';
 import{logService}from'../../services/logService';
 import{adminUserService,AdminUserControlSnapshot}from'../../services/adminUserService';
 import toast from'react-hot-toast';
-import{AlertTriangle,BadgeCheck,Ban,Building2,CreditCard,Edit3,FileText,Filter,Fingerprint,History,KeyRound,LockKeyhole,NotebookPen,RefreshCw,RotateCcw,Search,Shield,ShieldCheck,Snowflake,Truck,User as UserIcon,WalletCards,X}from'lucide-react';
+import{AlertTriangle,BadgeCheck,Ban,Building2,CreditCard,Edit3,FileText,Filter,Fingerprint,History,KeyRound,LockKeyhole,NotebookPen,RefreshCw,RotateCcw,Search,Shield,ShieldCheck,Snowflake,Trash2,Truck,User as UserIcon,WalletCards,X}from'lucide-react';
 import{firestoreErrorMessage,firestoreNetwork}from'../../lib/firestoreNetwork';
 
 type Tab='control'|'wallets'|'cards'|'requests'|'deliveries'|'history'|'security';
@@ -19,8 +19,8 @@ type SortFilter='newest'|'oldest'|'name_asc'|'name_desc';
 const fmt=(value?:number)=>value?new Date(value).toLocaleString('fr-FR'):'—';
 const safeDate=(value?:number)=>value&&!Number.isNaN(new Date(value).getTime())?new Date(value).toLocaleDateString('fr-FR'):'—';
 const roleLabel=(role:UserRole)=>({client:'Client',agent:'Agent point de vente',marchand:'Marchand',agent_administratif:'Agent administratif',chef_agence:"Chef d'agence",designer_graphique:'Designer graphique',livreur:'Livreur',admin_general:'Admin général'}[role]||role);
-const statusLabel=(status?:AccountStatus)=>status==='blocked'?'Bloqué':status==='suspended'?'Suspendu':'Actif';
-const statusClass=(status?:AccountStatus)=>status==='blocked'?'bg-red-100 text-red-700':status==='suspended'?'bg-amber-100 text-amber-800':'bg-emerald-100 text-emerald-700';
+const statusLabel=(status?:AccountStatus)=>status==='banned'?'Banni':status==='deleted'?'Supprimé':status==='blocked'?'Bloqué':status==='suspended'?'Suspendu':'Actif';
+const statusClass=(status?:AccountStatus)=>status==='banned'?'bg-red-700 text-white':status==='deleted'?'bg-slate-700 text-white':status==='blocked'?'bg-red-100 text-red-700':status==='suspended'?'bg-amber-100 text-amber-800':'bg-emerald-100 text-emerald-700';
 const money=(value:number,currency:string)=>currency==='CDF'?`${Number(value||0).toLocaleString('fr-FR',{maximumFractionDigits:0})} CDF`:`${Number(value||0).toFixed(2)} USD`;
 
 export default function AdminUsers(){
@@ -137,14 +137,46 @@ export default function AdminUsers(){
     await loadControl(uid);
   }
 
-  async function accountAction(status:AccountStatus){
+  async function accountAction(status:'active'|'suspended'|'blocked'){
     if(!selectedUser||currentUser?.role!=='admin_general'||actionLoading)return;
-    if(selectedUser.uid===currentUser.uid)return toast.error('Vous ne pouvez pas suspendre votre propre compte ici.');
+    if(selectedUser.uid===currentUser.uid)return toast.error('Vous ne pouvez pas modifier votre propre accès ici.');
+    let durationMinutes: number|undefined;
+    if(status==='suspended'){
+      const value=window.prompt('Durée de suspension en heures (ex. 1, 24, 72, 168) :','24');
+      if(value===null)return;
+      const hours=Number(value.replace(',','.'));
+      if(!Number.isFinite(hours)||hours<=0||hours>8760)return toast.error('Durée invalide. Utilisez un nombre d’heures entre 0 et 8760.');
+      durationMinutes=Math.round(hours*60);
+    }
     const text=status==='active'?'réactiver':status==='suspended'?'suspendre temporairement':'bloquer';
     if(!window.confirm(`Confirmer : ${text} le compte de ${selectedUser.displayName||selectedUser.email} ?`))return;
     setActionLoading(`account:${status}`);
-    try{await adminUserService.setAccountStatus(selectedUser.uid,status);toast.success(status==='active'?'Compte réactivé.':'Compte sécurisé et wallets gelés.');await loadControl(selectedUser.uid);await loadUsers();setSelectedUser(prev=>prev?{...prev,accountStatus:status}:prev)}
+    try{const result=await adminUserService.setAccountStatus(selectedUser.uid,status,durationMinutes);const suspendedUntil=result.suspendedUntil||0;toast.success(status==='active'?'Compte réactivé.':status==='suspended'?`Compte suspendu jusqu’au ${fmt(suspendedUntil)}.`:'Compte bloqué et wallets gelés.');await loadControl(selectedUser.uid);await loadUsers();setSelectedUser(prev=>prev?{...prev,accountStatus:status,suspendedUntil}:prev)}
     catch(error:any){toast.error(error?.message||'Action impossible.')}
+    finally{setActionLoading('')}
+  }
+
+  async function deleteAccount(){
+    if(!selectedUser||currentUser?.role!=='admin_general'||actionLoading)return;
+    if(selectedUser.uid===currentUser.uid)return toast.error('Votre propre compte ne peut pas être supprimé ici.');
+    const token=window.prompt(`SUPPRESSION DU COMPTE\n\nL’utilisateur pourra recréer un nouveau compte plus tard avec la même adresse e-mail.\nTapez SUPPRIMER pour confirmer :`,'');
+    if(token!=='SUPPRIMER')return;
+    setActionLoading('delete-account');
+    try{await adminUserService.deleteAccount(selectedUser.uid);toast.success('Compte supprimé. Cette adresse e-mail pourra se réinscrire plus tard.');setSelectedUser(prev=>prev?{...prev,accountStatus:'deleted',deletedAt:Date.now()}:prev);await loadUsers();await loadControl(selectedUser.uid)}
+    catch(error:any){toast.error(error?.message||'Suppression impossible.')}
+    finally{setActionLoading('')}
+  }
+
+  async function banAccount(){
+    if(!selectedUser||currentUser?.role!=='admin_general'||actionLoading)return;
+    if(selectedUser.uid===currentUser.uid)return toast.error('Votre propre compte ne peut pas être banni ici.');
+    const reason=window.prompt(`BANNISSEMENT DÉFINITIF\n\nL’adresse ${selectedUser.email} ne pourra plus créer ni utiliser un compte Market-Cash.\nIndiquez le motif :`,'Fraude / violation des conditions Market-Cash')?.trim();
+    if(!reason)return;
+    const token=window.prompt('Tapez BANNIR pour confirmer définitivement :','');
+    if(token!=='BANNIR')return;
+    setActionLoading('ban-account');
+    try{await adminUserService.banAccount(selectedUser.uid,reason);toast.success('Compte et adresse e-mail bannis définitivement.');setSelectedUser(prev=>prev?{...prev,accountStatus:'banned',bannedAt:Date.now()}:prev);await loadUsers();await loadControl(selectedUser.uid)}
+    catch(error:any){toast.error(error?.message||'Bannissement impossible.')}
     finally{setActionLoading('')}
   }
 
@@ -183,7 +215,7 @@ export default function AdminUsers(){
   const resetFilters=()=>{setSearchQuery('');setRoleFilter('all');setAgencyFilter('all');setProfileFilter('all');setPeriodFilter('all');setSortFilter('newest')};
   const filtered=useMemo(()=>{
     const now=Date.now(),day=86400000;
-    const result=users.filter(u=>{const q=searchQuery.trim().toLowerCase();const search=!q||[u.displayName,u.email,u.phone,u.role,u.agencyName,u.agencyId].some(v=>String(v||'').toLowerCase().includes(q));const complete=Boolean(u.displayName?.trim()&&u.email?.trim()&&u.phone?.trim());const created=Number(u.createdAt||0);return search&&(roleFilter==='all'||u.role===roleFilter)&&(agencyFilter==='all'||(u.agencyName||u.agencyId||'')===agencyFilter)&&(profileFilter==='all'||(profileFilter==='complete'&&complete)||(profileFilter==='incomplete'&&!complete)||(profileFilter==='with_phone'&&!!u.phone?.trim())||(profileFilter==='without_phone'&&!u.phone?.trim()))&&(periodFilter==='all'||(periodFilter==='today'&&created>=now-day)||(periodFilter==='7d'&&created>=now-7*day)||(periodFilter==='30d'&&created>=now-30*day))});
+    const result=users.filter(u=>{const q=searchQuery.trim().toLowerCase();const search=!q||[u.displayName,u.email,u.phone,u.role,u.agencyName,u.agencyId,u.accountStatus].some(v=>String(v||'').toLowerCase().includes(q));const complete=Boolean(u.displayName?.trim()&&u.email?.trim()&&u.phone?.trim());const created=Number(u.createdAt||0);return search&&(roleFilter==='all'||u.role===roleFilter)&&(agencyFilter==='all'||(u.agencyName||u.agencyId||'')===agencyFilter)&&(profileFilter==='all'||(profileFilter==='complete'&&complete)||(profileFilter==='incomplete'&&!complete)||(profileFilter==='with_phone'&&!!u.phone?.trim())||(profileFilter==='without_phone'&&!u.phone?.trim()))&&(periodFilter==='all'||(periodFilter==='today'&&created>=now-day)||(periodFilter==='7d'&&created>=now-7*day)||(periodFilter==='30d'&&created>=now-30*day))});
     return [...result].sort((a,b)=>sortFilter==='oldest'?Number(a.createdAt||0)-Number(b.createdAt||0):sortFilter==='name_asc'?String(a.displayName||'').localeCompare(String(b.displayName||''),'fr'):sortFilter==='name_desc'?String(b.displayName||'').localeCompare(String(a.displayName||''),'fr'):Number(b.createdAt||0)-Number(a.createdAt||0));
   },[users,searchQuery,roleFilter,agencyFilter,profileFilter,periodFilter,sortFilter]);
   const activeFilterCount=[roleFilter!=='all',agencyFilter!=='all',profileFilter!=='all',periodFilter!=='all',sortFilter!=='newest',Boolean(searchQuery.trim())].filter(Boolean).length;
@@ -191,7 +223,7 @@ export default function AdminUsers(){
   if(loading)return <div className="p-8 text-center font-bold text-slate-500">Chargement des utilisateurs...</div>;
 
   return <div className="mx-auto max-w-7xl space-y-4 pb-24 px-1 sm:px-0">
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h1 className="text-xl font-black text-blue-950 sm:text-2xl">Clients & Wallets</h1><p className="text-xs text-slate-500">Gestion complète des comptes, accès, sécurité, wallets et activités.</p></div><div className="relative sm:w-80"><Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="Nom, email, téléphone, rôle..." className="w-full rounded-xl border bg-white py-2.5 pl-9 pr-3 text-sm outline-none focus:border-blue-500"/></div></div>
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h1 className="text-xl font-black text-blue-950 sm:text-2xl">Clients & Wallets</h1><p className="text-xs text-slate-500">Gestion complète des comptes, accès, sécurité, wallets et activités.</p></div><div className="relative sm:w-80"><Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="Nom, email, téléphone, rôle, statut..." className="w-full rounded-xl border bg-white py-2.5 pl-9 pr-3 text-sm outline-none focus:border-blue-500"/></div></div>
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-5"><Stat label="Utilisateurs" value={users.length}/><Stat label="Clients" value={users.filter(u=>u.role==='client').length}/><Stat label="Agents" value={users.filter(u=>u.role==='agent').length}/><Stat label="Marchands" value={users.filter(u=>u.role==='marchand').length}/><Stat label="Personnel" value={users.filter(u=>!['client','agent','marchand'].includes(u.role)).length}/></div>
 
     <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4"><div className="flex items-center justify-between"><div className="flex items-center gap-2 text-blue-950"><Filter size={16}/><span className="text-sm font-black">Filtrer & trier</span>{activeFilterCount>0&&<span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-black text-blue-700">{activeFilterCount}</span>}</div><button onClick={resetFilters} className="flex items-center gap-1 text-[11px] font-black text-slate-500"><RotateCcw size={13}/>Réinitialiser</button></div>
@@ -210,7 +242,8 @@ export default function AdminUsers(){
         {tab==='control'&&<div className="space-y-4">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-5"><Mini label="Cartes" value={cards.length}/><Mini label="Demandes" value={requests.length}/><Mini label="Livraisons" value={deliveries.length}/><Mini label="KYC" text={selectedUser.kycStatus||'not_started'}/><Mini label="Rôle" text={roleLabel(selectedUser.role)}/></div>
           <section className="rounded-2xl border bg-white p-4"><div className="mb-3 flex items-center gap-2"><Edit3 size={17} className="text-blue-800"/><h3 className="font-black text-slate-900">Informations du compte</h3></div><div className="grid gap-3 sm:grid-cols-2"><Field label="Nom complet"><input value={profileName} onChange={e=>setProfileName(e.target.value)} className="w-full rounded-xl border p-3 text-sm"/></Field><Field label="Téléphone"><input value={profilePhone} onChange={e=>setProfilePhone(e.target.value)} className="w-full rounded-xl border p-3 text-sm"/></Field><Info label="Email" value={selectedUser.email}/><Info label="Inscription" value={fmt(selectedUser.createdAt)}/><Info label="Agence" value={selectedUser.agencyName||selectedUser.agencyId}/><Info label="Dernière mise à jour" value={fmt(selectedUser.updatedAt)}/></div>{currentUser?.role==='admin_general'&&<div className="mt-4 flex flex-wrap gap-2"><button disabled={isSaving} onClick={saveIdentity} className="rounded-xl bg-blue-950 px-4 py-2.5 text-xs font-black text-white">Enregistrer identité</button><button onClick={()=>editRole(selectedUser)} className="rounded-xl border border-blue-950 px-4 py-2.5 text-xs font-black text-blue-950">Rôle & agence</button></div>}</section>
-          <section className="rounded-2xl border bg-white p-4"><div className="mb-3 flex items-center gap-2"><ShieldCheck size={18} className="text-emerald-600"/><div><h3 className="font-black">État & conformité</h3><p className="text-xs text-slate-500">Les décisions KYC restent traitées dans le module KYC & Comptes.</p></div></div><div className="grid gap-2 sm:grid-cols-3"><ControlInfo label="Compte" value={statusLabel(control?.accountStatus||selectedUser.accountStatus)}/><ControlInfo label="KYC" value={selectedUser.kycStatus||'not_started'}/><ControlInfo label="Accès" value={roleLabel(selectedUser.role)}/></div><div className="mt-3 flex flex-wrap gap-2"><button onClick={()=>navigate('/admin/account-requests')} className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-slate-700">Ouvrir KYC & Comptes</button>{currentUser?.role==='admin_general'&&<><button disabled={!!actionLoading} onClick={()=>accountAction('active')} className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700">Réactiver</button><button disabled={!!actionLoading} onClick={()=>accountAction('suspended')} className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-black text-amber-800">Suspendre</button><button disabled={!!actionLoading} onClick={()=>accountAction('blocked')} className="rounded-xl bg-red-50 px-3 py-2 text-xs font-black text-red-700">Bloquer</button></>}</div></section>
+          <section className="rounded-2xl border bg-white p-4"><div className="mb-3 flex items-center gap-2"><ShieldCheck size={18} className="text-emerald-600"/><div><h3 className="font-black">État & conformité</h3><p className="text-xs text-slate-500">Les décisions KYC restent traitées dans le module KYC & Comptes.</p></div></div><div className="grid gap-2 sm:grid-cols-4"><ControlInfo label="Compte" value={statusLabel(control?.accountStatus||selectedUser.accountStatus)}/><ControlInfo label="KYC" value={selectedUser.kycStatus||'not_started'}/><ControlInfo label="Accès" value={roleLabel(selectedUser.role)}/><ControlInfo label="Suspension jusqu’au" value={control?.suspendedUntil?fmt(control.suspendedUntil):'—'}/></div><div className="mt-3 flex flex-wrap gap-2"><button onClick={()=>navigate('/admin/account-requests')} className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-slate-700">Ouvrir KYC & Comptes</button>{currentUser?.role==='admin_general'&&<><button disabled={!!actionLoading} onClick={()=>accountAction('active')} className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700">Réactiver</button><button disabled={!!actionLoading} onClick={()=>accountAction('suspended')} className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-black text-amber-800">Suspendre avec durée</button><button disabled={!!actionLoading} onClick={()=>accountAction('blocked')} className="rounded-xl bg-red-50 px-3 py-2 text-xs font-black text-red-700">Bloquer</button></>}</div></section>
+          {currentUser?.role==='admin_general'&&<section className="rounded-2xl border border-red-200 bg-white p-4"><div className="mb-3 flex items-center gap-2 text-red-700"><AlertTriangle size={18}/><div><h3 className="font-black">Suppression & bannissement</h3><p className="text-xs font-medium text-slate-500">Supprimer permet une nouvelle inscription plus tard. Bannir interdit définitivement cette adresse e-mail.</p></div></div><div className="flex flex-wrap gap-2"><button disabled={!!actionLoading} onClick={deleteAccount} className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-xs font-black text-white"><Trash2 size={14}/>Supprimer le compte</button><button disabled={!!actionLoading} onClick={banAccount} className="inline-flex items-center gap-2 rounded-xl bg-red-700 px-4 py-2.5 text-xs font-black text-white"><Ban size={14}/>Bannir définitivement</button></div></section>}
           {currentUser?.role==='admin_general'&&<section className="rounded-2xl border bg-white p-4"><div className="mb-3 flex items-center gap-2"><NotebookPen size={17} className="text-blue-800"/><div><h3 className="font-black">Note administrative privée</h3><p className="text-xs text-slate-500">Visible uniquement par l’administration. Maximum 2 000 caractères.</p></div></div><textarea value={adminNote} maxLength={2000} onChange={e=>setAdminNote(e.target.value)} placeholder="Ex. client vérifié au siège, suivi nécessaire, incident résolu..." className="min-h-28 w-full rounded-2xl border p-3 text-sm outline-none focus:border-blue-500"/><div className="mt-2 flex justify-end"><button disabled={actionLoading==='note'} onClick={saveNote} className="rounded-xl bg-blue-950 px-4 py-2.5 text-xs font-black text-white">Enregistrer la note</button></div></section>}
         </div>}
 
