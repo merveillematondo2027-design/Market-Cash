@@ -1,4 +1,4 @@
-export type UserRole = 'admin_general' | 'agent_administratif' | 'chef_agence' | 'designer_graphique' | 'livreur' | 'client' | 'agent' | 'marchand';
+export type UserRole = 'admin_general' | 'agent_administratif' | 'chef_agence' | 'designer_graphique' | 'livreur' | 'client' | 'agent' | 'marchand' | 'developer' | 'api_partner';
 export type KycStatus = 'not_started' | 'pending' | 'approved' | 'rejected';
 export type AccountUpgradeType = 'agent' | 'marchand' | 'developer_direct' | 'api_partner';
 export type BusinessAccountType = 'merchant' | 'agent' | 'direct_developer' | 'api_provider';
