@@ -11,6 +11,7 @@ export const developerBusinessService={
   dashboard:()=>call<DeveloperDashboard>('getMyDeveloperDashboard'),
   access:()=>call<any>('getMyBusinessAccess'),
   registerApp:(appName:string)=>call<{appId:string;apiKey:string;appName:string;note:string}>('registerDeveloperApp',{appName}),
+  updateAppSettings:(input:{appId:string;apiEnabled:boolean;enabledFeatures:string[];allowedCurrencies:string[]})=>call<{ok:boolean;appId:string;status:string;apiEnabled:boolean;enabledFeatures:string[];allowedCurrencies:string[]}>('updateDeveloperAppSettings',input),
   createSubDeveloper:(input:{companyName:string;contactEmail:string;externalReference?:string})=>call<{subDeveloperId:string;status:string}>('partnerCreateSubDeveloper',input),
   listSubDevelopers:()=>call<{developers:any[]}>('partnerListSubDevelopers'),
 };
