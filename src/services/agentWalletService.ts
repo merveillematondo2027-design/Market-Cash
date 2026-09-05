@@ -154,7 +154,7 @@ export const agentWalletService = {
   },
   getMyInternalCards: async() => (await call<Record<string,never>,{cards:InternalCardSummary[]}>('getMyLocalMarketCashCardsV3')({})).data.cards,
   fundInternalCard: async(input:{cardId:string;currency:WalletCurrency;amount:number;cvv:string;idempotencyKey:string}) => (await call<typeof input,{ok:boolean;reference:string;transactionId:string}>('walletToLocalCardWithCvv')(input)).data,
-  getMyWalletHistory: async() => (await call<Record<string,never>,{transactions:any[]}>('getMyWalletHistory')({})).data.transactions,
+  getMyWalletHistory: async() => (await call<Record<string,never>,{transactions:any[]}>('getMyTransactionsV2')({})).data.transactions,
   createWalletDeposit: async(input:{rail:'mobile_money'|'bank';currency:WalletCurrency;amount:number;network?:string;phone?:string;bank?:string;idempotencyKey:string}) => (await call<typeof input,WalletDepositRequest>('createWalletDeposit')(input)).data,
 
   verifyApplicationSecret: async(pin:string) => (await call<{pin:string},{ok:boolean}>('verifyApplicationSecret')({pin})).data,
