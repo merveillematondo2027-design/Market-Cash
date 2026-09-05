@@ -6,10 +6,13 @@ service firebase.storage {
     function getUserRole(){return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role;}
     function isBootstrapAdminEmail(){return isSignedIn() && request.auth.token.email in ["merveillematondo2027@gmail.com","emmanuelmungwele1@gmail.com"];}
     function isAdminGeneral(){return isSignedIn() && (isBootstrapAdminEmail() || getUserRole() == 'admin_general');}
+    function isAdminReviewer(){return isSignedIn() && (isAdminGeneral() || getUserRole() == 'agent_administratif');}
     function isChefAgence(){return isSignedIn() && (isAdminGeneral() || getUserRole() == 'chef_agence');}
     function isDesignerGraphique(){return isSignedIn() && (isAdminGeneral() || getUserRole() == 'designer_graphique');}
     function validImage(){return request.resource.size <= 5 * 1024 * 1024 && request.resource.contentType.matches('image/(jpeg|png|webp|jpg)');}
     function validKycImage(){return request.resource.size <= 12 * 1024 * 1024 && request.resource.contentType.matches('image/(jpeg|png|webp|jpg)');}
+    function validBusinessIdentity(){return request.resource.size <= 12 * 1024 * 1024 && (request.resource.contentType.matches('image/(jpeg|png|webp|jpg)') || request.resource.contentType == 'application/pdf');}
+    function validBusinessPdf(){return request.resource.size <= 15 * 1024 * 1024 && request.resource.contentType == 'application/pdf';}
 
     match /payment-proofs/{userId}/{fileName}{
       allow read:if isOwner(userId)||isChefAgence();
@@ -25,6 +28,17 @@ service firebase.storage {
       allow read:if isOwner(userId)||isChefAgence();
       allow create:if isOwner(userId)&&validImage();
       allow delete:if isOwner(userId)||isChefAgence();
+    }
+
+    match /business-upgrades/{userId}/identity/{fileName}{
+      allow read:if isOwner(userId)||isAdminReviewer();
+      allow create,update:if isOwner(userId)&&validBusinessIdentity();
+      allow delete:if isOwner(userId)||isAdminGeneral();
+    }
+    match /business-upgrades/{userId}/company/{fileName}{
+      allow read:if isOwner(userId)||isAdminReviewer();
+      allow create,update:if isOwner(userId)&&validBusinessPdf();
+      allow delete:if isOwner(userId)||isAdminGeneral();
     }
 
     // Documents KYC privés: propriétaire + personnel de vérification autorisé.
