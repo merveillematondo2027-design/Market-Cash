@@ -27,8 +27,6 @@ export const agentCashOut = blockedLegacySpending('LEGACY_AGENT_WALLET_CASHOUT_B
 export const walletToInternalCard = blockedLegacySpending('LEGACY_INTERNAL_CARD_TOPUP_BLOCKED', 'Cet ancien module carte est désactivé. Rechargez uniquement la carte locale Market-Cash.');
 export const agentCardCashOut = blockedLegacySpending('LEGACY_OLD_CARD_CASHOUT_BLOCKED', 'Cet ancien parcours de retrait carte est désactivé. Utilisez la nouvelle carte locale Market-Cash.');
 
-// Legacy transaction endpoints that accepted the application PIN are blocked.
-// Client monetary confirmation now uses the three-digit Market-Cash CVV.
 export const marketCashTransfer = blockedLegacySpending('LEGACY_PIN_TRANSFER_BLOCKED', 'Cette version du transfert est désactivée. Confirmez avec votre CVV Market-Cash.');
 export const walletToLocalMarketCashCardV2 = blockedLegacySpending('LEGACY_PIN_LOCAL_TOPUP_BLOCKED', 'Cette version de recharge est désactivée. Confirmez avec votre CVV Market-Cash.');
 export const merchantPaymentFromLocalCardV2 = blockedLegacySpending('LEGACY_PIN_LOCAL_PAYMENT_BLOCKED', 'Cette version du paiement est désactivée. Confirmez avec votre CVV Market-Cash.');
@@ -42,6 +40,7 @@ export * from './agentTerminal';
 export * from './agentAdmin';
 export * from './localCard';
 export * from './localCardExplicit';
+export * from './localCardManagement';
 export * from './security';
 export * from './identityV2';
 export * from './cardProvisioningV2';
