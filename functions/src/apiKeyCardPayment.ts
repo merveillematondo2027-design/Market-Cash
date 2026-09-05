@@ -45,6 +45,37 @@ async function canonicalCardIdentity(cardNumber: string) {
   return { uid, cardId, holder: normalize(card.data()?.cardHolder || card.data()?.cardHolderName), last4: cardNumber.slice(-4) };
 }
 
+function normalizeCardReference(value: unknown) {
+  const raw = normalize(value);
+  if (!raw) return '';
+  const native = raw.match(/(?:MARKET-CASH-CARD\s*:\s*)?(MCL-[A-Z0-9_-]{4,120})/i);
+  return native?.[1]?.toUpperCase() || '';
+}
+
+async function resolveCardCapture(cardReference: unknown) {
+  const identifier = normalizeCardReference(cardReference);
+  if (!identifier) return null;
+  const cards = await db.collection('local_cards').where('cardIdentifier', '==', identifier).limit(1).get();
+  if (cards.empty) return null;
+  const cardDoc = cards.docs[0];
+  const card = cardDoc.data() || {};
+  if (String(card.program || '') !== 'market_cash_local' || String(card.status || '') !== 'active') return null;
+  const cardNumber = normalize(card.cardNumber).replace(/\D/g, '');
+  if (!/^4585020002\d{6}$/.test(cardNumber)) return null;
+  const cardHolder = normalize(card.cardHolder || card.cardHolderName || card.userName || 'CLIENT MARKET-CASH');
+  const expiry = normalize(card.expiryEnd);
+  if (!/^\d{2}\/\d{2}$/.test(expiry)) return null;
+  return {
+    cardId: String(card.cardId || cardDoc.id),
+    userId: String(card.userId || ''),
+    cardIdentifier: identifier,
+    cardNumber,
+    cardHolder,
+    expiry,
+    cardLast4: cardNumber.slice(-4),
+  };
+}
+
 const failureLabel=(code:string)=>({INSUFFICIENT_FUNDS:'Solde insuffisant',CARD_INVALID:'Carte invalide',CARD_NOT_FOUND:'Carte introuvable',CARD_INACTIVE:'Carte inactive',CARD_ACCOUNT_INACTIVE:'Compte carte inactif',CVV_INVALID:'Code de sécurité incorrect',EXPIRY_INVALID:'Date d’expiration invalide',EXPIRY_MISMATCH:'Date d’expiration incorrecte',DEVELOPER_WALLET_INACTIVE:'Compte bénéficiaire indisponible'} as Record<string,string>)[code]||'Paiement refusé';
 
 async function recordPaymentOutcome(params:{appId:string;app:any;body:Record<string,any>;identity:any;payload:any;approved:boolean}){
@@ -93,6 +124,33 @@ export const marketCashApiCardPaymentByKey = onRequest({ region: REGION }, async
     if (!apiKey) throw new Error('UNAUTHORIZED');
     const {appId,app}=await resolveActiveDeveloperApp(apiKey);
     const body = { ...(req.body || {}) } as Record<string, any>;
+
+    if (String(body.operation || '') === 'resolve-card') {
+      const card = await resolveCardCapture(body.cardReference);
+      if (!card) {
+        res.status(404).json({ status: 'error', resolved: false, code: 'CARD_REFERENCE_NOT_FOUND' });
+        return;
+      }
+      await db.collection('audit_events').add({
+        actorId: String(app.developerId || appId),
+        actorType: 'developer_app',
+        action: 'MARKET_CASH_CARD_REFERENCE_RESOLVED',
+        resourceId: card.cardId,
+        appId,
+        cardLast4: card.cardLast4,
+        createdAt: Date.now(),
+      }).catch(() => undefined);
+      res.status(200).json({
+        status: 'resolved',
+        resolved: true,
+        cardNumber: card.cardNumber,
+        cardHolder: card.cardHolder,
+        expiry: card.expiry,
+        cardLast4: card.cardLast4,
+      });
+      return;
+    }
+
     const cardNumber = normalize(body.cardNumber).replace(/\D/g, '');
     const identity = await canonicalCardIdentity(cardNumber);
     if (identity?.holder) body.cardHolder = identity.holder;
