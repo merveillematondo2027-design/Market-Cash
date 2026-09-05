@@ -50,3 +50,4 @@ export * from './apiKeyCardPayment';
 export * from './developerAppSettings';
 export * from './businessAccounts';
 export * from './developerRoleSync';
+export * from './transactionHistory';
