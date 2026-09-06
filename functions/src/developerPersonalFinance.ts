@@ -56,7 +56,7 @@ async function requireDeveloper(uid:string){
   if(!developer.exists||developer.data()?.status!=='active')throw new HttpsError('failed-precondition','Compte Developer non actif.');
   return {user,developer,developerId:developer.id};
 }
-async function ensureWallet(uid:string,currency:Currency,accountType='client'){
+async function ensureWallet(uid:string,currency:Currency,accountType:'client'|'agent'|'business'='client'){
   const ref=db.doc(`wallet_accounts/${walletId(uid,currency)}`);
   const snap=await ref.get();
   if(!snap.exists){
@@ -93,18 +93,25 @@ async function requireDeveloperCvv(uid:string,value:any){
   const expectedHash=String(security.data()?.localTransactionCvvHash||sha256(existing));
   if(sha256(cvv)!==expectedHash)throw new HttpsError('permission-denied','CVV Market-Cash incorrect.');
 }
+function validWalletPublicId(value:string){
+  return /^(?:MCW|MCM|MCA)-(?:[A-F0-9]{10}|\d{6}[A-Z])$/.test(value);
+}
 async function resolveRecipient(marketCashIdRaw:any,senderUid:string){
   const marketCashId=String(marketCashIdRaw||'').trim().toUpperCase();
-  if(!/^MCW-[A-F0-9]{10}$/.test(marketCashId))throw new HttpsError('invalid-argument','ID Market-Cash invalide.');
+  if(!validWalletPublicId(marketCashId))throw new HttpsError('invalid-argument','ID Market-Cash invalide.');
   const mapping=await db.doc(`wallet_public_ids/${marketCashId}`).get();
   if(!mapping.exists)throw new HttpsError('not-found','Bénéficiaire Market-Cash introuvable.');
   const recipientUid=String(mapping.data()?.userId||'');
   if(!recipientUid||recipientUid===senderUid)throw new HttpsError('failed-precondition','Bénéficiaire invalide.');
   const user=await db.doc(`users/${recipientUid}`).get();
   if(!user.exists)throw new HttpsError('not-found','Profil bénéficiaire introuvable.');
-  const status=String(user.data()?.accountStatus||'active');
-  if(['blocked','banned','deleted'].includes(status))throw new HttpsError('failed-precondition','Bénéficiaire indisponible.');
-  return {recipientUid,marketCashId,displayName:String(user.data()?.displayName||'Utilisateur Market-Cash')};
+  const userData=user.data()||{};
+  const status=String(userData.accountStatus||'active');
+  const suspended=status==='suspended'&&(!userData.suspendedUntil||Number(userData.suspendedUntil)>Date.now());
+  if(['blocked','banned','deleted'].includes(status)||suspended)throw new HttpsError('failed-precondition','Bénéficiaire indisponible.');
+  const role=String(userData.role||'client');
+  const accountType: 'client'|'agent'|'business'=role==='agent'?'agent':role==='marchand'?'business':'client';
+  return {recipientUid,marketCashId,displayName:String(userData.displayName||'Utilisateur Market-Cash'),role,accountType};
 }
 async function resolveMerchant(marketCashIdRaw:any,payerUid:string){
   const recipient=await resolveRecipient(marketCashIdRaw,payerUid);
@@ -113,7 +120,7 @@ async function resolveMerchant(marketCashIdRaw:any,payerUid:string){
     db.doc(`merchant_profiles/${recipient.recipientUid}`).get(),
   ]);
   if(user.data()?.role!=='marchand'||!profile.exists||profile.data()?.status!=='active')throw new HttpsError('failed-precondition','Ce compte n’est pas un marchand Market-Cash actif.');
-  return {...recipient,displayName:String(profile.data()?.tradeName||user.data()?.displayName||'Marchand Market-Cash')};
+  return {...recipient,displayName:String(profile.data()?.tradeName||user.data()?.displayName||'Marchand Market-Cash'),accountType:'business' as const};
 }
 async function ensureBilling(developerId:string,uid:string,tier:string){
   const ref=db.doc(`developer_billing_accounts/${billingId(developerId)}`);
@@ -134,7 +141,7 @@ export const developerRevealLocalCardSecureData=onCall({region:REGION},async req
 
 export const developerWalletTransferWithCvv=onCall({region:REGION},async request=>{
   const uid=requireAuth(request);const dev=await requireDeveloper(uid);const currency=parseCurrency(request.data?.currency);const amount=parseAmount(request.data?.amount);const txId=parseIdempotencyKey(request.data?.idempotencyKey,'devtransfer',uid);
-  await requireDeveloperCvv(uid,request.data?.cvv);const recipient=await resolveRecipient(request.data?.marketCashId,uid);await Promise.all([ensureWallet(uid,currency,'client'),ensureWallet(recipient.recipientUid,currency,recipient.recipientUid?'client':'client')]);
+  await requireDeveloperCvv(uid,request.data?.cvv);const recipient=await resolveRecipient(request.data?.marketCashId,uid);await Promise.all([ensureWallet(uid,currency,'client'),ensureWallet(recipient.recipientUid,currency,recipient.accountType)]);
   return db.runTransaction(async tx=>{const txRef=db.doc(`wallet_transactions/${txId}`),existing=await tx.get(txRef);if(existing.exists)return{ok:true,duplicate:true,reference:existing.data()?.reference,transactionId:txId};const source=db.doc(`wallet_accounts/${walletId(uid,currency)}`),dest=db.doc(`wallet_accounts/${walletId(recipient.recipientUid,currency)}`);const[s,d]=await Promise.all([tx.get(source),tx.get(dest)]);if(!s.exists||s.data()?.status!=='active'||Number(s.data()?.availableBalance||0)<amount)throw new HttpsError('failed-precondition','Solde portefeuille insuffisant.');if(!d.exists||d.data()?.status!=='active')throw new HttpsError('failed-precondition','Portefeuille bénéficiaire indisponible.');const now=Date.now(),reference=`MC-DEV-TRF-${now}`,sb=Number(s.data()?.availableBalance||0),dbal=Number(d.data()?.availableBalance||0);tx.update(source,{availableBalance:round(sb-amount),ledgerBalance:round(Number(s.data()?.ledgerBalance||sb)-amount),updatedAt:now});tx.update(dest,{availableBalance:round(dbal+amount),ledgerBalance:round(Number(d.data()?.ledgerBalance||dbal)+amount),updatedAt:now});tx.set(txRef,{id:txId,reference,type:'developer_personal_transfer',status:'settled',developerId:dev.developerId,userId:uid,senderId:uid,recipientId:recipient.recipientUid,userIds:[uid,recipient.recipientUid],currency,amount,sourceWalletId:source.id,destinationWalletId:dest.id,authenticatedBy:'local_cvv',adminVisible:true,createdAt:now,updatedAt:now});tx.set(db.collection('ledger_entries').doc(),{transactionId:txId,walletId:source.id,userId:uid,direction:'debit',amount,currency,createdAt:now});tx.set(db.collection('ledger_entries').doc(),{transactionId:txId,walletId:dest.id,userId:recipient.recipientUid,direction:'credit',amount,currency,createdAt:now});tx.set(db.collection('notifications').doc(),{userId:recipient.recipientUid,title:'Argent reçu',message:`Vous avez reçu ${amount} ${currency} de ${String(dev.developer.data()?.companyName||'un Developer Market-Cash')}.`,type:'success',category:'transaction',read:false,transactionId:txId,createdAt:now});return{ok:true,reference,transactionId:txId};});
 });
 
