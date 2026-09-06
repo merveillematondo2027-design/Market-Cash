@@ -20,52 +20,39 @@ function requireAuth(request: any) {
   return uid;
 }
 
+async function ownedApp(uid:string,appId:string){
+  const appRef=db.doc(`developer_apps/${appId}`);const appSnap=await appRef.get();
+  if(!appSnap.exists)throw new HttpsError('not-found','Application introuvable.');
+  const app=appSnap.data()||{};
+  if(String(app.userId||'')!==uid||String(app.developerId||'')!==developerAccountId(uid))throw new HttpsError('permission-denied','Cette application ne vous appartient pas.');
+  return{appRef,app};
+}
+
 export const updateDeveloperAppSettings = onCall({ region: REGION }, async request => {
   const uid = requireAuth(request);
   const appId = normalize(request.data?.appId).toUpperCase();
   if (!appId) throw new HttpsError('invalid-argument', 'Application requise.');
-
-  const appRef = db.doc(`developer_apps/${appId}`);
-  const appSnap = await appRef.get();
-  if (!appSnap.exists) throw new HttpsError('not-found', 'Application introuvable.');
-  const app = appSnap.data() || {};
-  if (String(app.userId || '') !== uid || String(app.developerId || '') !== developerAccountId(uid)) {
-    throw new HttpsError('permission-denied', 'Cette application ne vous appartient pas.');
-  }
-
+  const {appRef,app}=await ownedApp(uid,appId);
   const allowedFeatures = app.businessType === 'api_provider' ? PROVIDER_FEATURES : DIRECT_FEATURES;
   const requestedFeatures = Array.isArray(request.data?.enabledFeatures) ? request.data.enabledFeatures.map(normalize) : [];
   const enabledFeatures = allowedFeatures.filter(feature => requestedFeatures.includes(feature));
   const requestedCurrencies = Array.isArray(request.data?.allowedCurrencies) ? request.data.allowedCurrencies.map((v: unknown) => normalize(v).toUpperCase()) : [];
   const allowedCurrencies = CURRENCIES.filter(currency => requestedCurrencies.includes(currency));
   const apiEnabled = request.data?.apiEnabled !== false;
-
-  if (apiEnabled && !enabledFeatures.length) {
-    throw new HttpsError('invalid-argument', 'Activez au moins une fonctionnalité API.');
-  }
-  if (apiEnabled && !allowedCurrencies.length) {
-    throw new HttpsError('invalid-argument', 'Activez au moins une devise.');
-  }
-
+  if (apiEnabled && !enabledFeatures.length) throw new HttpsError('invalid-argument', 'Activez au moins une fonctionnalité API.');
+  if (apiEnabled && !allowedCurrencies.length) throw new HttpsError('invalid-argument', 'Activez au moins une devise.');
   const now = Date.now();
-  await appRef.set({
-    status: apiEnabled ? 'active' : 'disabled',
-    apiEnabled,
-    enabledFeatures,
-    allowedCurrencies,
-    updatedAt: now,
-  }, { merge: true });
+  await appRef.set({status:apiEnabled?'active':'disabled',apiEnabled,enabledFeatures,allowedCurrencies,updatedAt:now},{merge:true});
+  await db.collection('audit_events').add({actorId:uid,actorType:'developer',action:'DEVELOPER_APP_SETTINGS_UPDATED',resourceId:appId,apiEnabled,enabledFeatures,allowedCurrencies,createdAt:now});
+  return { ok:true,appId,apiEnabled,status:apiEnabled?'active':'disabled',enabledFeatures,allowedCurrencies };
+});
 
-  await db.collection('audit_events').add({
-    actorId: uid,
-    actorType: 'developer',
-    action: 'DEVELOPER_APP_SETTINGS_UPDATED',
-    resourceId: appId,
-    apiEnabled,
-    enabledFeatures,
-    allowedCurrencies,
-    createdAt: now,
-  });
-
-  return { ok: true, appId, apiEnabled, status: apiEnabled ? 'active' : 'disabled', enabledFeatures, allowedCurrencies };
+export const deleteDeveloperApp = onCall({region:REGION},async request=>{
+  const uid=requireAuth(request);const appId=normalize(request.data?.appId).toUpperCase();
+  if(!appId)throw new HttpsError('invalid-argument','Application requise.');
+  const{appRef,app}=await ownedApp(uid,appId);const now=Date.now();
+  const txs=await db.collection('wallet_transactions').where('appId','==',appId).limit(1).get();
+  await appRef.set({status:'deleted',apiEnabled:false,deletedAt:now,deletedBy:uid,apiKeyHash:null,updatedAt:now},{merge:true});
+  await db.collection('audit_events').add({actorId:uid,actorType:'developer',action:'DEVELOPER_APP_DELETED',resourceId:appId,appName:String(app.appName||''),hadTransactions:!txs.empty,createdAt:now});
+  return{ok:true,appId,status:'deleted'};
 });
