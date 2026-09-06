@@ -18,7 +18,7 @@ const cardAccountId = (cardId: string, currency: Currency) => `card_${currency.t
 const developerAccountId = (uid: string) => `DEV-${sha256(`developer:${uid}`).slice(0, 10).toUpperCase()}`;
 const developerWalletId = (developerId: string, currency: Currency) => `dev_${currency.toLowerCase()}_${developerId}`;
 const billingAccountId = (developerId: string) => `billing_${developerId}`;
-const apiRevenueId = 'market_cash_api_revenue_usd';
+const apiRevenueId = (currency: Currency) => `market_cash_api_revenue_${currency.toLowerCase()}`;
 
 function requireAuth(request: any) {
   const uid = String(request.auth?.uid || '');
@@ -51,10 +51,14 @@ const DEFAULT_FEES = {
 } as const;
 type FeeAction = keyof typeof DEFAULT_FEES;
 
-async function apiUnitPrice(partner: boolean) {
+async function developerApiPricing() {
   const configured = (await db.doc('app_settings/developer_api_pricing').get()).data() || {};
-  const value = Number(partner ? configured.wholesaleUsd : configured.directUsd);
-  return roundMoney(Number.isFinite(value) && value >= 0 ? value : (partner ? 0.05 : 0.10));
+  const directPercent = Number(configured.directPercent);
+  const wholesaleUsd = Number(configured.wholesaleUsd);
+  return {
+    directPercent: Number.isFinite(directPercent) && directPercent >= 0 && directPercent <= 100 ? directPercent : 2.5,
+    wholesaleUsd: roundMoney(Number.isFinite(wholesaleUsd) && wholesaleUsd >= 0 ? wholesaleUsd : 0.05),
+  };
 }
 
 async function ensureDeveloperWallets(developerId: string, uid: string) {
@@ -144,26 +148,34 @@ export const marketCashApiCardPayment = onRequest({ region: REGION }, async (req
     const allowedCurrencies=Array.isArray(auth.app.allowedCurrencies)?auth.app.allowedCurrencies:CURRENCIES;if(!allowedCurrencies.includes(currency))throw new Error('CURRENCY_NOT_ALLOWED');
     if(!/^4585020002\d{6}$/.test(cardNumber))throw new Error('CARD_INVALID'); if(!/^\d{3}$/.test(cvv))throw new Error('CVV_INVALID'); if(!/^\d{2}\/\d{2}$/.test(expiry))throw new Error('EXPIRY_INVALID'); if(externalReference.length<6||externalReference.length>120)throw new Error('REFERENCE_INVALID');
     const registry=await db.doc(`card_number_registry/${cardNumber}`).get();if(!registry.exists)throw new Error('CARD_NOT_FOUND');
-    const clientUid=String(registry.data()?.userId||''),cardId=localCardIdForUid(clientUid),txId=`devpay_${sha256(`${auth.appId}:${externalReference}`).slice(0,36)}`,cardRef=db.doc(`local_cards/${cardId}`),cardWalletRef=db.doc(`card_wallet_accounts/${cardAccountId(cardId,currency)}`),developerWalletRef=db.doc(`developer_wallet_accounts/${developerWalletId(auth.developerId,currency)}`),billingRef=db.doc(`developer_billing_accounts/${billingAccountId(auth.developerId)}`),apiRevenueRef=db.doc(`platform_revenue_accounts/${apiRevenueId}`),txRef=db.doc(`wallet_transactions/${txId}`),securityRef=db.doc(`user_security/${clientUid}`);
-    const partner=auth.developer.businessType==='api_provider',usageFeeUsd=await apiUnitPrice(partner);
+    const clientUid=String(registry.data()?.userId||''),cardId=localCardIdForUid(clientUid),txId=`devpay_${sha256(`${auth.appId}:${externalReference}`).slice(0,36)}`,cardRef=db.doc(`local_cards/${cardId}`),cardWalletRef=db.doc(`card_wallet_accounts/${cardAccountId(cardId,currency)}`),developerWalletRef=db.doc(`developer_wallet_accounts/${developerWalletId(auth.developerId,currency)}`),billingRef=db.doc(`developer_billing_accounts/${billingAccountId(auth.developerId)}`),apiRevenueRef=db.doc(`platform_revenue_accounts/${apiRevenueId(currency)}`),txRef=db.doc(`wallet_transactions/${txId}`),securityRef=db.doc(`user_security/${clientUid}`);
+    const partner=auth.developer.businessType==='api_provider',pricing=await developerApiPricing();
     const result=await db.runTransaction(async tx=>{
-      const[existing,cardSnap,cardWallet,developerWallet,billing,apiRevenue,security]=await Promise.all([tx.get(txRef),tx.get(cardRef),tx.get(cardWalletRef),tx.get(developerWalletRef),tx.get(billingRef),tx.get(apiRevenueRef),tx.get(securityRef)]);
+      const refs=[tx.get(txRef),tx.get(cardRef),tx.get(cardWalletRef),tx.get(developerWalletRef),tx.get(apiRevenueRef),tx.get(securityRef)];
+      if(partner)refs.push(tx.get(billingRef));
+      const snapshots=await Promise.all(refs),existing=snapshots[0],cardSnap=snapshots[1],cardWallet=snapshots[2],developerWallet=snapshots[3],apiRevenue=snapshots[4],security=snapshots[5],billing=partner?snapshots[6]:null;
       if(existing.exists)return{duplicate:true,...existing.data()};
       if(!cardSnap.exists||cardSnap.data()?.status!=='active')throw new Error('CARD_INACTIVE');const card=cardSnap.data()!;
       if(String(card.cardNumber||'')!==cardNumber)throw new Error('CARD_INVALID');if(normalizeUpper(card.cardHolder||card.cardHolderName)!==holder)throw new Error('HOLDER_MISMATCH');if(!expiryMatches(String(card.expiryEnd||''),expiry))throw new Error('EXPIRY_MISMATCH');if(security.data()?.localTransactionCvvHash!==sha256(cvv))throw new Error('CVV_INVALID');
       if(!cardWallet.exists||cardWallet.data()?.status!=='active')throw new Error('CARD_ACCOUNT_INACTIVE');if(!developerWallet.exists||developerWallet.data()?.status!=='active')throw new Error('DEVELOPER_WALLET_INACTIVE');
-      if(!billing.exists||billing.data()?.status!=='active')throw new Error('API_BILLING_ACCOUNT_INACTIVE');const billingBalance=Number(billing.data()?.availableBalance||0);if(billingBalance<usageFeeUsd)throw new Error('API_BILLING_BALANCE_LOW');
-      const cardBalance=Number(cardWallet.data()?.availableBalance||0);if(cardBalance<amount)throw new Error('INSUFFICIENT_FUNDS');const developerBalance=Number(developerWallet.data()?.availableBalance||0),apiRevenueBalance=Number(apiRevenue.data()?.availableBalance||0),now=Date.now(),reference=`MC-PAY-${now}-${randomBytes(3).toString('hex').toUpperCase()}`,cardBalanceAfter=roundMoney(cardBalance-amount),developerBalanceAfter=roundMoney(developerBalance+amount),billingAfter=roundMoney(billingBalance-usageFeeUsd),apiRevenueAfter=roundMoney(apiRevenueBalance+usageFeeUsd);
+      const cardBalance=Number(cardWallet.data()?.availableBalance||0);if(cardBalance<amount)throw new Error('INSUFFICIENT_FUNDS');
+      let platformFee=0,billingAfter:number|null=null,billingModel='percentage_from_received_amount';
+      if(partner){if(!billing?.exists||billing.data()?.status!=='active')throw new Error('API_BILLING_ACCOUNT_INACTIVE');const billingBalance=Number(billing.data()?.availableBalance||0);if(billingBalance<pricing.wholesaleUsd)throw new Error('API_BILLING_BALANCE_LOW');platformFee=pricing.wholesaleUsd;billingAfter=roundMoney(billingBalance-platformFee);billingModel='partner_prepaid_flat_per_successful_request';}
+      else platformFee=roundMoney(amount*pricing.directPercent/100);
+      const developerNet=partner?amount:roundMoney(Math.max(0,amount-platformFee));
+      const developerBalance=Number(developerWallet.data()?.availableBalance||0),apiRevenueBalance=Number(apiRevenue.data()?.availableBalance||0),now=Date.now(),reference=`MC-PAY-${now}-${randomBytes(3).toString('hex').toUpperCase()}`,cardBalanceAfter=roundMoney(cardBalance-amount),developerBalanceAfter=roundMoney(developerBalance+developerNet),apiRevenueAfter=roundMoney(apiRevenueBalance+platformFee);
       tx.update(cardWalletRef,{availableBalance:cardBalanceAfter,ledgerBalance:roundMoney(Number(cardWallet.data()?.ledgerBalance||cardBalance)-amount),updatedAt:now});
-      tx.update(developerWalletRef,{availableBalance:developerBalanceAfter,ledgerBalance:roundMoney(Number(developerWallet.data()?.ledgerBalance||developerBalance)+amount),updatedAt:now});
-      tx.update(billingRef,{availableBalance:billingAfter,ledgerBalance:roundMoney(Number(billing.data()?.ledgerBalance||billingBalance)-usageFeeUsd),lastUsageAt:now,updatedAt:now});
-      tx.set(apiRevenueRef,{id:apiRevenueRef.id,currency:'USD',availableBalance:apiRevenueAfter,ledgerBalance:apiRevenueAfter,updatedAt:now,createdAt:apiRevenue.data()?.createdAt||now},{merge:true});
-      const record={id:txId,reference,externalReference,type:'developer_card_payment',status:'settled',currency,amount,feeAmount:0,clientFeeAmount:0,totalDebited:amount,netAmount:amount,apiUsageFeeUsd:usageFeeUsd,billingModel:'flat_per_successful_payment_request',clientId:clientUid,userId:clientUid,userIds:[clientUid],cardId,developerId:auth.developerId,appId:auth.appId,developerName:auth.developer.companyName,appName:auth.app.appName,reason,rail:'market_cash_api',source:partner?'API_PROVIDER':'MARKET_CASH_DIRECT',pricingTier:partner?'wholesale':'direct',cardLast4:cardNumber.slice(-4),cardBalanceAfter,developerBalanceAfter,billingBalanceAfter:billingAfter,adminVisible:true,createdAt:now,updatedAt:now};
-      tx.set(txRef,record);tx.set(db.collection('ledger_entries').doc(),{transactionId:txId,cardWalletId:cardWalletRef.id,userId:clientUid,direction:'debit',amount,currency,entryType:'client_card_payment',createdAt:now});tx.set(db.collection('ledger_entries').doc(),{transactionId:txId,developerWalletId:developerWalletRef.id,developerId:auth.developerId,direction:'credit',amount,currency,entryType:'developer_sale',createdAt:now});tx.set(db.collection('developer_billing_transactions').doc(),{developerId:auth.developerId,appId:auth.appId,transactionId:txId,type:'api_usage',status:'settled',currency:'USD',amount:usageFeeUsd,direction:'debit',balanceAfter:billingAfter,createdAt:now});tx.set(db.collection('ledger_entries').doc(),{transactionId:txId,revenueWalletId:apiRevenueRef.id,direction:'credit',amount:usageFeeUsd,currency:'USD',entryType:'market_cash_api_usage_revenue',createdAt:now});
-      tx.set(db.collection('notifications').doc(),{userId:clientUid,title:'Paiement Market-Cash effectué',message:`${amount} ${currency} payé à ${auth.developer.companyName}. Aucun frais API débité sur votre paiement. Réf: ${reference}.`,type:'success',category:'transaction',transactionId:txId,read:false,createdAt:now});
-      tx.set(db.collection('audit_events').doc(),{actorId:auth.developerId,actorType:partner?'api_provider_app':'developer_app',action:'MARKET_CASH_API_CARD_PAYMENT',resourceId:txId,result:'success',clientId:clientUid,appId:auth.appId,amount,currency,apiUsageFeeUsd:usageFeeUsd,billingModel:'flat_per_successful_payment_request',pricingTier:partner?'wholesale':'direct',createdAt:now});
+      tx.update(developerWalletRef,{availableBalance:developerBalanceAfter,ledgerBalance:roundMoney(Number(developerWallet.data()?.ledgerBalance||developerBalance)+developerNet),updatedAt:now});
+      if(partner&&billing&&billingAfter!==null)tx.update(billingRef,{availableBalance:billingAfter,ledgerBalance:roundMoney(Number(billing.data()?.ledgerBalance||Number(billing.data()?.availableBalance||0))-platformFee),lastUsageAt:now,updatedAt:now});
+      tx.set(apiRevenueRef,{id:apiRevenueRef.id,currency,availableBalance:apiRevenueAfter,ledgerBalance:apiRevenueAfter,updatedAt:now,createdAt:apiRevenue.data()?.createdAt||now},{merge:true});
+      const record={id:txId,reference,externalReference,type:'developer_card_payment',status:'settled',currency,amount,feeAmount:platformFee,clientFeeAmount:0,totalDebited:amount,netAmount:developerNet,apiUsageFeeUsd:partner?platformFee:0,platformFeeAmount:platformFee,platformFeeCurrency:partner?'USD':currency,directFeePercent:partner?0:pricing.directPercent,billingModel,clientId:clientUid,userId:clientUid,userIds:[clientUid],cardId,developerId:auth.developerId,appId:auth.appId,developerName:auth.developer.companyName,appName:auth.app.appName,reason,rail:'market_cash_api',source:partner?'API_PROVIDER':'MARKET_CASH_DIRECT',pricingTier:partner?'wholesale':'direct',cardLast4:cardNumber.slice(-4),cardBalanceAfter,developerBalanceAfter,billingBalanceAfter:billingAfter,adminVisible:true,createdAt:now,updatedAt:now};
+      tx.set(txRef,record);tx.set(db.collection('ledger_entries').doc(),{transactionId:txId,cardWalletId:cardWalletRef.id,userId:clientUid,direction:'debit',amount,currency,entryType:'client_card_payment',createdAt:now});tx.set(db.collection('ledger_entries').doc(),{transactionId:txId,developerWalletId:developerWalletRef.id,developerId:auth.developerId,direction:'credit',amount:developerNet,currency,entryType:'developer_sale_net',createdAt:now});
+      if(partner&&billingAfter!==null)tx.set(db.collection('developer_billing_transactions').doc(),{developerId:auth.developerId,appId:auth.appId,transactionId:txId,type:'api_usage',status:'settled',currency:'USD',amount:platformFee,direction:'debit',balanceAfter:billingAfter,createdAt:now});
+      tx.set(db.collection('ledger_entries').doc(),{transactionId:txId,revenueWalletId:apiRevenueRef.id,direction:'credit',amount:platformFee,currency:partner?'USD':currency,entryType:partner?'market_cash_partner_api_usage_revenue':'market_cash_direct_api_percentage_revenue',createdAt:now});
+      tx.set(db.collection('notifications').doc(),{userId:clientUid,title:'Paiement Market-Cash effectué',message:`${amount} ${currency} payé à ${auth.developer.companyName}. Réf: ${reference}.`,type:'success',category:'transaction',transactionId:txId,read:false,createdAt:now});
+      tx.set(db.collection('audit_events').doc(),{actorId:auth.developerId,actorType:partner?'api_provider_app':'developer_app',action:'MARKET_CASH_API_CARD_PAYMENT',resourceId:txId,result:'success',clientId:clientUid,appId:auth.appId,amount,currency,platformFeeAmount:platformFee,platformFeeCurrency:partner?'USD':currency,directFeePercent:partner?0:pricing.directPercent,billingModel,pricingTier:partner?'wholesale':'direct',createdAt:now});
       return record;
     });
-    res.status(200).json({status:'approved',approved:true,duplicate:Boolean((result as any).duplicate),reference:(result as any).reference,externalReference,amount,feeAmount:0,totalDebited:amount,apiUsageFeeUsd:usageFeeUsd,currency,pricingTier:partner?'wholesale':'direct',developer:auth.developer.companyName,app:auth.app.appName});
+    res.status(200).json({status:'approved',approved:true,duplicate:Boolean((result as any).duplicate),reference:(result as any).reference,externalReference,amount,feeAmount:(result as any).feeAmount||0,netAmount:(result as any).netAmount??amount,totalDebited:amount,apiUsageFeeUsd:partner?pricing.wholesaleUsd:0,directFeePercent:partner?0:pricing.directPercent,currency,pricingTier:partner?'wholesale':'direct',developer:auth.developer.companyName,app:auth.app.appName});
   }catch(error:any){const code=String(error?.message||'INTERNAL_ERROR');const status=code==='UNAUTHORIZED'?401:['DEVELOPER_INACTIVE','API_SCOPE_DENIED'].includes(code)?403:['API_BILLING_BALANCE_LOW','API_BILLING_ACCOUNT_INACTIVE','INSUFFICIENT_FUNDS'].includes(code)?402:400;console.warn('[MARKET_CASH_API_CARD_PAYMENT_DECLINED]',code);res.status(status).json({status:'declined',approved:false,code})}
 });
