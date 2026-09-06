@@ -108,11 +108,32 @@ jobs:
             done
           fi
 
+          developer_set=0
+          if [ "${#function_changes[@]}" -gt 0 ]; then
+            developer_set=1
+            for file in "${function_changes[@]}"; do
+              case "$file" in
+                functions/src/developerPersonalFinance.ts|functions/src/entry.ts) ;;
+                *) developer_set=0 ;;
+              esac
+            done
+          fi
+
           # Firestore Eventarc triggers currently require project-level IAM bindings
           # that the GitHub deployer is not allowed to grant. The application does
           # not depend on them for interactive recovery because the callable local
           # card endpoints self-heal verified historical accounts.
-          if [ "$bridge_set" -eq 1 ]; then
+          if [ "$developer_set" -eq 1 ]; then
+            cat > /tmp/market-cash-functions.txt <<'EOF'
+          developerRevealLocalCardSecureData
+          developerWalletTransferWithCvv
+          developerWalletToLocalCardWithCvv
+          developerMerchantPaymentWithCvv
+          developerFundApiBillingFromWallet
+          EOF
+            echo 'Targeted Market-Cash Developer finance deployment selected.'
+            echo '1' > /tmp/market-cash-batch-size.txt
+          elif [ "$bridge_set" -eq 1 ]; then
             cat > /tmp/market-cash-functions.txt <<'EOF'
           marketCashApiCardPaymentByKey
           EOF
