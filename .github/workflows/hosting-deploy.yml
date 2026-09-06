@@ -9,7 +9,7 @@ on:
       - 'assets/**'
       - 'index.html'
       - 'package.json'
-      - 'package-lock.json'
+      - 'bun.lock'
       - 'vite.config.*'
       - 'tsconfig*.json'
       - 'firebase.json'
@@ -31,11 +31,10 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          node-version: 22
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install --no-package-lock --no-audit --no-fund
 
       - name: TypeScript
         run: npm run lint
