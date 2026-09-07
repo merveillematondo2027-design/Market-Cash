@@ -2,6 +2,7 @@ import { logService } from './services/logService';
 import React, { StrictMode, ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
+import PwaInstallButton from './components/PwaInstallButton';
 import './index.css';
 
 // Capture global errors
@@ -83,6 +84,7 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
       <App />
+      <PwaInstallButton />
     </ErrorBoundary>
   </StrictMode>,
 );
