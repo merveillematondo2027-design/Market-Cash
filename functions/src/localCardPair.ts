@@ -1,5 +1,6 @@
 import { createHash, randomInt } from 'node:crypto';
 import { getApps, initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
 
@@ -7,8 +8,8 @@ if (!getApps().length) initializeApp();
 const db = getFirestore();
 export const LOCAL_CARD_CURRENCIES = ['USD', 'CDF'] as const;
 export type LocalCardCurrency = typeof LOCAL_CARD_CURRENCIES[number];
-export const LOCAL_CARD_PREFIX = '5585020002';
-export const LOCAL_CARD_SCHEME = 'MC_LOCAL_V3_5585';
+export const LOCAL_CARD_PREFIX = '4585020002';
+export const LOCAL_CARD_SCHEME = 'MC_LOCAL_V3_4585';
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 export const legacyLocalCardId = (uid: string) => `local_${sha256(`local-card:${uid}`).slice(0, 24)}`;
 export const localCardId = (uid: string, currency: LocalCardCurrency) => `local_${currency.toLowerCase()}_${sha256(`local-card:${currency}:${uid}`).slice(0, 20)}`;
@@ -22,13 +23,46 @@ function validity(startValue?: number) {
   return { expiryStart: fmt(start), expiryEnd: fmt(end) };
 }
 
-async function requireClient(uid: string) {
+/**
+ * Every authenticated Market-Cash user is entitled to the personal wallet/card
+ * layer, regardless of the professional role attached to the same account.
+ * A brand-new Firebase Auth account may reach this callable a few milliseconds
+ * before the client has persisted users/{uid}; provision a minimal client
+ * profile server-side so card creation is never blocked by that race.
+ */
+async function requireEligibleUser(uid: string) {
   const ref = db.doc(`users/${uid}`);
-  const snap = await ref.get();
-  if (!snap.exists) throw new HttpsError('not-found', 'Compte introuvable.');
+  let snap = await ref.get();
+
+  if (!snap.exists) {
+    try {
+      const authUser = await getAuth().getUser(uid);
+      const now = Date.now();
+      const displayName = String(authUser.displayName || authUser.email?.split('@')[0] || 'Utilisateur Market-Cash').trim() || 'Utilisateur Market-Cash';
+      await ref.set({
+        uid,
+        email: authUser.email || '',
+        displayName,
+        phone: authUser.phoneNumber || '',
+        role: 'client',
+        accountStatus: 'active',
+        kycStatus: 'not_started',
+        createdAt: now,
+        updatedAt: now,
+        provisionedBy: 'local_card_bootstrap',
+      }, { merge: true });
+      snap = await ref.get();
+    } catch (error) {
+      console.error('[LOCAL_CARD_USER_BOOTSTRAP_ERROR]', { uid, error });
+      throw new HttpsError('failed-precondition', 'Votre compte Market-Cash est encore en cours de préparation. Réessayez dans quelques secondes.');
+    }
+  }
+
+  if (!snap.exists) throw new HttpsError('not-found', 'Compte Market-Cash introuvable.');
   const data = snap.data()!;
-  if (data.role !== 'client') throw new HttpsError('permission-denied', 'Compte Client requis.');
-  if (['blocked', 'suspended', 'banned', 'deleted'].includes(String(data.accountStatus || ''))) throw new HttpsError('failed-precondition', 'Compte indisponible.');
+  if (['blocked', 'suspended', 'banned', 'deleted'].includes(String(data.accountStatus || ''))) {
+    throw new HttpsError('failed-precondition', 'Compte indisponible.');
+  }
   return { ref, data };
 }
 
@@ -81,7 +115,7 @@ async function migrateLegacyBalance(uid: string, currency: LocalCardCurrency, de
 }
 
 export async function ensureLocalCardPair(uid: string) {
-  const user = await requireClient(uid);
+  const user = await requireEligibleUser(uid);
   const holder = String(user.data.displayName || user.data.fullName || 'CLIENT MARKET-CASH').trim() || 'CLIENT MARKET-CASH';
   const cards: any[] = [];
 
