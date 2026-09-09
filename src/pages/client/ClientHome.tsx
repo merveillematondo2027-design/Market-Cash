@@ -5,21 +5,33 @@ import toast from'react-hot-toast';
 import{useAuthStore}from'../../store/authStore';
 import SecurityConfirmModal from'../../components/SecurityConfirmModal';
 import{agentWalletService,WalletServerSnapshot}from'../../services/agentWalletService';
+import{clientStartupCache}from'../../services/clientStartupCache';
 import{WalletCurrency}from'../../types/wallet';
 
 const money=(v:number,c:WalletCurrency)=>c==='CDF'?`${Number(v||0).toLocaleString('fr-FR',{maximumFractionDigits:0})} CDF`:`${Number(v||0).toFixed(2)} USD`;
 
 export default function ClientHome(){
   const{user}=useAuthStore();
+  const startup=user?.uid?clientStartupCache.peek(user.uid):null;
   const[currency,setCurrency]=useState<WalletCurrency>(()=>(localStorage.getItem('marketcash_wallet_currency')as WalletCurrency)||'USD');
-  const[server,setServer]=useState<WalletServerSnapshot|null>(null);
-  const[marketCashId,setMarketCashId]=useState('');
+  const[server,setServer]=useState<WalletServerSnapshot|null>(()=>startup?.wallet||null);
+  const[marketCashId,setMarketCashId]=useState(()=>startup?.marketCashId||'');
   const[revealed,setRevealed]=useState(false);
   const[securityOpen,setSecurityOpen]=useState(false);
   const[securityBusy,setSecurityBusy]=useState(false);
   const first=user?.displayName?.trim().split(' ')[0]||'Client';
 
-  useEffect(()=>{if(!user?.uid)return;agentWalletService.ensureWalletProfile().then(setServer).catch(()=>{});agentWalletService.ensureLocalCard().catch(error=>console.warn('[LOCAL_CARD_PROVISION_WARNING]',error));agentWalletService.getMyMarketCashIdentity().then(x=>setMarketCashId(x.marketCashId)).catch(()=>{})},[user?.uid]);
+  useEffect(()=>{
+    if(!user?.uid)return;
+    const cached=clientStartupCache.peek(user.uid);
+    if(cached?.wallet)setServer(cached.wallet);
+    if(cached?.marketCashId)setMarketCashId(cached.marketCashId);
+    if(cached&&clientStartupCache.isFresh(user.uid)&&cached.walletLoaded&&cached.identityLoaded)return;
+    agentWalletService.ensureWalletProfile().then(setServer).catch(()=>{});
+    agentWalletService.ensureLocalCard().catch(error=>console.warn('[LOCAL_CARD_PROVISION_WARNING]',error));
+    agentWalletService.getMyMarketCashIdentity().then(x=>setMarketCashId(x.marketCashId)).catch(()=>{});
+  },[user?.uid]);
+
   const changeCurrency=(c:WalletCurrency)=>{setCurrency(c);setRevealed(false);localStorage.setItem('marketcash_wallet_currency',c)};
   const available=Number(server?.wallets?.[currency]?.availableBalance||0);
   const confirmReveal=async(pin:string)=>{setSecurityBusy(true);try{await agentWalletService.verifyApplicationSecret(pin);setRevealed(true);setSecurityOpen(false)}catch(error:any){toast.error(error?.message||'Code secret incorrect.')}finally{setSecurityBusy(false)}};

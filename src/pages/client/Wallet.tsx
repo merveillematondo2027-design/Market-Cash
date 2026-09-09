@@ -5,6 +5,7 @@ import toast from'react-hot-toast';
 import{useAuthStore}from'../../store/authStore';
 import{walletService}from'../../services/walletService';
 import{agentWalletService,WalletServerSnapshot}from'../../services/agentWalletService';
+import{clientStartupCache}from'../../services/clientStartupCache';
 import SecurityConfirmModal from'../../components/SecurityConfirmModal';
 import{WalletCurrency}from'../../types/wallet';
 const money=(v:number,c:WalletCurrency)=>c==='CDF'?`${Number(v||0).toLocaleString('fr-FR',{maximumFractionDigits:0})} CDF`:`${Number(v||0).toFixed(2)} USD`;
@@ -13,14 +14,24 @@ export default function ClientWallet(){
   const{user}=useAuthStore();
   const[params]=useSearchParams();
   const initial=(params.get('currency')==='CDF'?'CDF':(localStorage.getItem('marketcash_wallet_currency')as WalletCurrency)||'USD')as WalletCurrency;
+  const startup=user?.uid?clientStartupCache.peek(user.uid):null;
   const[currency,setCurrency]=useState<WalletCurrency>(initial);
-  const[server,setServer]=useState<WalletServerSnapshot|null>(null);
-  const[loading,setLoading]=useState(false);
+  const[server,setServer]=useState<WalletServerSnapshot|null>(()=>startup?.wallet||null);
+  const[loading,setLoading]=useState(()=>!startup?.wallet);
   const[revealed,setRevealed]=useState(false);
   const[securityOpen,setSecurityOpen]=useState(false);
   const[securityBusy,setSecurityBusy]=useState(false);
   const preview=useMemo(()=>user?.uid?walletService.getWalletsPreview(user.uid):null,[user?.uid]);
-  useEffect(()=>{if(!user?.uid)return;setLoading(true);agentWalletService.getMyWallets().then(setServer).catch(e=>console.warn('[WALLET_SERVER_UNAVAILABLE]',e)).finally(()=>setLoading(false))},[user?.uid]);
+
+  useEffect(()=>{
+    if(!user?.uid)return;
+    const cached=clientStartupCache.peek(user.uid);
+    if(cached?.wallet){setServer(cached.wallet);setLoading(false)}
+    if(cached&&clientStartupCache.isFresh(user.uid)&&cached.walletLoaded)return;
+    setLoading(true);
+    agentWalletService.getMyWallets().then(setServer).catch(e=>console.warn('[WALLET_SERVER_UNAVAILABLE]',e)).finally(()=>setLoading(false));
+  },[user?.uid]);
+
   const raw=server?.wallets?.[currency];
   const wallet=raw?{...preview?.[currency],...raw}:preview?.[currency];
   const transactions=walletService.getTransactionsPreview(currency);

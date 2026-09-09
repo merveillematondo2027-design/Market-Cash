@@ -1,10 +1,9 @@
 import React,{useEffect,useMemo,useState}from'react';
-import{ArrowLeft,ChevronRight,CreditCard,RefreshCw,ShieldCheck,Sparkles}from'lucide-react';
+import{ArrowLeft,ChevronRight,CreditCard,RefreshCw,Sparkles}from'lucide-react';
 import{Link,useNavigate,useSearchParams}from'react-router-dom';
 import toast from'react-hot-toast';
 import CardProductFace,{CardProductVariant}from'../../components/CardProductFace';
 import SecurityConfirmModal from'../../components/SecurityConfirmModal';
-import{agentWalletService}from'../../services/agentWalletService';
 import{cardSecurityService,VisaCardSummary,VisaSecureData}from'../../services/cardSecurityService';
 import{localCardPairService,LocalPairCardSummary,LocalPairSecureData}from'../../services/localCardPairService';
 import{cardCache,cardCacheKeys}from'../../services/cardCache';
@@ -17,17 +16,83 @@ type RevealTarget={kind:CardProductVariant;id:string}|null;
 const friendlyLocalError=(error:any)=>String(error?.message||'Impossible de préparer vos cartes locales pour le moment.');
 
 export default function CardsHub(){
-  const{user}=useAuthStore();const navigate=useNavigate();const[searchParams]=useSearchParams();const uid=user?.uid||'';
-  const visaMode=searchParams.get('visa')==='buy';const selectedKind=searchParams.get('card')as CardProductVariant|null;const selectedCardId=searchParams.get('cardId');const selectedAction=searchParams.get('action');const topupChooser=selectedAction==='topup'&&!selectedKind;
+  const{user}=useAuthStore();
+  const navigate=useNavigate();
+  const[searchParams]=useSearchParams();
+  const uid=user?.uid||'';
+  const visaMode=searchParams.get('visa')==='buy';
+  const selectedKind=searchParams.get('card')as CardProductVariant|null;
+  const selectedCardId=searchParams.get('cardId');
+  const selectedAction=searchParams.get('action');
+  const topupChooser=selectedAction==='topup'&&!selectedKind;
+  const initialLocal=uid?cardCache.get<LocalPairCardSummary[]>(cardCacheKeys.local(uid)):null;
   const initialVisa=uid?cardCache.get<VisaCardSummary[]>(cardCacheKeys.visa(uid)):null;
-  const[localCards,setLocalCards]=useState<LocalPairCardSummary[]>([]);const[localSecure,setLocalSecure]=useState<Record<string,LocalPairSecureData>>({});const[visaCards,setVisaCards]=useState<VisaCardSummary[]>(initialVisa||[]);const[visaSecure,setVisaSecure]=useState<Record<string,VisaSecureData>>({});const[loadingLocal,setLoadingLocal]=useState(true);const[loadingVisa,setLoadingVisa]=useState(!initialVisa);const[localError,setLocalError]=useState('');const[localRetry,setLocalRetry]=useState(0);const[revealed,setRevealed]=useState<Record<string,boolean>>({});const[pendingReveal,setPendingReveal]=useState<RevealTarget>(null);const[securityBusy,setSecurityBusy]=useState(false);
+  const[localCards,setLocalCards]=useState<LocalPairCardSummary[]>(initialLocal||[]);
+  const[localSecure,setLocalSecure]=useState<Record<string,LocalPairSecureData>>({});
+  const[visaCards,setVisaCards]=useState<VisaCardSummary[]>(initialVisa||[]);
+  const[visaSecure,setVisaSecure]=useState<Record<string,VisaSecureData>>({});
+  const[loadingLocal,setLoadingLocal]=useState(!initialLocal);
+  const[loadingVisa,setLoadingVisa]=useState(!initialVisa);
+  const[localError,setLocalError]=useState('');
+  const[localRetry,setLocalRetry]=useState(0);
+  const[revealed,setRevealed]=useState<Record<string,boolean>>({});
+  const[pendingReveal,setPendingReveal]=useState<RevealTarget>(null);
+  const[securityBusy,setSecurityBusy]=useState(false);
 
-  useEffect(()=>{if(!uid||visaMode||selectedKind)return;let active=true;setLoadingLocal(true);setLocalError('');localCardPairService.ensure().then(cards=>{if(active)setLocalCards(cards)}).catch(error=>{console.warn('[LOCAL_CARD_PAIR_LOAD_ERROR]',error);if(active)setLocalError(friendlyLocalError(error))}).finally(()=>active&&setLoadingLocal(false));return()=>{active=false}},[uid,visaMode,selectedKind,localRetry]);
-  useEffect(()=>{if(!uid||visaMode||selectedKind)return;let active=true;if(!visaCards.length)setLoadingVisa(true);cardSecurityService.getMyVisaCards().then(cards=>{if(active){setVisaCards(cards);cardCache.set(cardCacheKeys.visa(uid),cards)}}).catch(error=>console.warn('[VISA_SUMMARIES_ERROR]',error)).finally(()=>active&&setLoadingVisa(false));return()=>{active=false}},[uid,visaMode,selectedKind]);
+  useEffect(()=>{
+    if(!uid||visaMode||selectedKind)return;
+    const cached=cardCache.get<LocalPairCardSummary[]>(cardCacheKeys.local(uid));
+    if(cached){setLocalCards(cached);setLoadingLocal(false);setLocalError('');return}
+    let active=true;
+    setLoadingLocal(true);
+    setLocalError('');
+    localCardPairService.ensure().then(cards=>{
+      if(active){setLocalCards(cards);cardCache.set(cardCacheKeys.local(uid),cards)}
+    }).catch(error=>{
+      console.warn('[LOCAL_CARD_PAIR_LOAD_ERROR]',error);
+      if(active)setLocalError(friendlyLocalError(error));
+    }).finally(()=>active&&setLoadingLocal(false));
+    return()=>{active=false};
+  },[uid,visaMode,selectedKind,localRetry]);
 
-  const standardCards=useMemo(()=>visaCards.filter(card=>card.tier==='standard').slice(0,2),[visaCards]);const goldCard=useMemo(()=>visaCards.find(card=>card.tier==='gold')||null,[visaCards]);
-  const askReveal=(kind:CardProductVariant,id:string)=>{if(revealed[id]){setRevealed(current=>({...current,[id]:false}));if(kind==='local')setLocalSecure(current=>{const next={...current};delete next[id];return next});else setVisaSecure(current=>{const next={...current};delete next[id];return next});return}setPendingReveal({kind,id})};
-  const confirmReveal=async(pin:string)=>{if(!pendingReveal)return;setSecurityBusy(true);try{if(pendingReveal.kind==='local'){const secure=await localCardPairService.reveal(pendingReveal.id,pin);setLocalSecure(current=>({...current,[pendingReveal.id]:secure}))}else{const secure=await cardSecurityService.revealVisaCard(pendingReveal.id,pin);setVisaSecure(current=>({...current,[pendingReveal.id]:secure}))}setRevealed(current=>({...current,[pendingReveal.id]:true}));setPendingReveal(null)}catch(error:any){toast.error(error?.message||'Code secret incorrect.')}finally{setSecurityBusy(false)}};
+  useEffect(()=>{
+    if(!uid||visaMode||selectedKind)return;
+    const cached=cardCache.get<VisaCardSummary[]>(cardCacheKeys.visa(uid));
+    if(cached){setVisaCards(cached);setLoadingVisa(false);return}
+    let active=true;
+    setLoadingVisa(true);
+    cardSecurityService.getMyVisaCards().then(cards=>{
+      if(active){setVisaCards(cards);cardCache.set(cardCacheKeys.visa(uid),cards)}
+    }).catch(error=>console.warn('[VISA_SUMMARIES_ERROR]',error)).finally(()=>active&&setLoadingVisa(false));
+    return()=>{active=false};
+  },[uid,visaMode,selectedKind]);
+
+  const standardCards=useMemo(()=>visaCards.filter(card=>card.tier==='standard').slice(0,2),[visaCards]);
+  const goldCard=useMemo(()=>visaCards.find(card=>card.tier==='gold')||null,[visaCards]);
+  const askReveal=(kind:CardProductVariant,id:string)=>{
+    if(revealed[id]){
+      setRevealed(current=>({...current,[id]:false}));
+      if(kind==='local')setLocalSecure(current=>{const next={...current};delete next[id];return next});
+      else setVisaSecure(current=>{const next={...current};delete next[id];return next});
+      return;
+    }
+    setPendingReveal({kind,id});
+  };
+  const confirmReveal=async(pin:string)=>{
+    if(!pendingReveal)return;
+    setSecurityBusy(true);
+    try{
+      if(pendingReveal.kind==='local'){
+        const secure=await localCardPairService.reveal(pendingReveal.id,pin);
+        setLocalSecure(current=>({...current,[pendingReveal.id]:secure}));
+      }else{
+        const secure=await cardSecurityService.revealVisaCard(pendingReveal.id,pin);
+        setVisaSecure(current=>({...current,[pendingReveal.id]:secure}));
+      }
+      setRevealed(current=>({...current,[pendingReveal.id]:true}));
+      setPendingReveal(null);
+    }catch(error:any){toast.error(error?.message||'Code secret incorrect.')}finally{setSecurityBusy(false)}
+  };
   const openCard=(kind:CardProductVariant,id?:string)=>navigate(`/client/cards?card=${kind}${id?`&cardId=${encodeURIComponent(id)}`:''}`);
 
   if(visaMode)return <div className="pb-28"><div className="mx-auto max-w-4xl px-3.5 pt-4 sm:px-6"><Link to="/client/cards" className="inline-flex items-center gap-2 text-sm font-black text-slate-500"><ArrowLeft size={17}/>Mes cartes</Link></div><ClientCards/></div>;
@@ -47,4 +112,6 @@ export default function CardsHub(){
   </div>;
 }
 
-function ProductEmptyState({icon,title,text,action,to,gold=false}:{icon:React.ReactNode;title:string;text:string;action:string;to:string;gold?:boolean}){return <div className={`rounded-[1.75rem] border p-5 ${gold?'border-amber-200 bg-amber-50/70':'bg-white'} shadow-sm`}><div className="grid h-12 w-12 place-items-center rounded-2xl bg-slate-100 text-blue-950">{icon}</div><h3 className="mt-4 text-lg font-black">{title}</h3><p className="mt-2 text-sm text-slate-500">{text}</p><Link to={to} className={`mt-4 flex items-center justify-between rounded-2xl px-4 py-3 text-sm font-black ${gold?'bg-amber-400 text-blue-950':'bg-blue-950 text-white'}`}><span>{action}</span><ChevronRight size={17}/></Link></div>}
+function ProductEmptyState({icon,title,text,action,to,gold=false}:{icon:React.ReactNode;title:string;text:string;action:string;to:string;gold?:boolean}){
+  return <div className={`rounded-[1.75rem] border p-5 ${gold?'border-amber-200 bg-amber-50/70':'bg-white'} shadow-sm`}><div className="grid h-12 w-12 place-items-center rounded-2xl bg-slate-100 text-blue-950">{icon}</div><h3 className="mt-4 text-lg font-black">{title}</h3><p className="mt-2 text-sm text-slate-500">{text}</p><Link to={to} className={`mt-4 flex items-center justify-between rounded-2xl px-4 py-3 text-sm font-black ${gold?'bg-amber-400 text-blue-950':'bg-blue-950 text-white'}`}><span>{action}</span><ChevronRight size={17}/></Link></div>;
+}
