@@ -8,6 +8,7 @@ if (!getApps().length) initializeApp();
 const db = getFirestore();
 export const LOCAL_CARD_CURRENCIES = ['USD', 'CDF'] as const;
 export type LocalCardCurrency = typeof LOCAL_CARD_CURRENCIES[number];
+// Official Market-Cash local-card numbering standard: 5585 0200 02xx xxxx.
 export const LOCAL_CARD_PREFIX = '5585020002';
 export const LOCAL_CARD_SCHEME = 'MC_LOCAL_V4_5585';
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
