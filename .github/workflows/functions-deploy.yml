@@ -82,8 +82,6 @@ jobs:
 
           bridge_set=0
           if [ "${#function_changes[@]}" -eq 0 ]; then
-            # Workflow-only/manual runs are used as a fast recovery path for the
-            # MUNGWELE IA server-to-server Market-Cash bridge.
             bridge_set=1
           else
             bridge_set=1
@@ -91,6 +89,17 @@ jobs:
               case "$file" in
                 functions/src/apiKeyCardPayment.ts|functions/src/entry.ts) ;;
                 *) bridge_set=0 ;;
+              esac
+            done
+          fi
+
+          local_pair_set=0
+          if [ "${#function_changes[@]}" -gt 0 ]; then
+            local_pair_set=1
+            for file in "${function_changes[@]}"; do
+              case "$file" in
+                functions/src/localCardPair.ts|functions/src/localCardPairOperations.ts|functions/src/entry.ts) ;;
+                *) local_pair_set=0 ;;
               esac
             done
           fi
@@ -108,16 +117,23 @@ jobs:
             done
           fi
 
-          # Firestore Eventarc triggers currently require project-level IAM bindings
-          # that the GitHub deployer is not allowed to grant. The application does
-          # not depend on them for interactive recovery because the callable local
-          # card endpoints self-heal verified historical accounts.
           if [ "$bridge_set" -eq 1 ]; then
             cat > /tmp/market-cash-functions.txt <<'EOF'
           marketCashApiCardPaymentByKey
           EOF
             echo 'Fast Market-Cash API-key payment bridge deployment selected.'
             echo '1' > /tmp/market-cash-batch-size.txt
+          elif [ "$local_pair_set" -eq 1 ]; then
+            cat > /tmp/market-cash-functions.txt <<'EOF'
+          ensureLocalCardPairV3
+          getMyLocalCardPairV3
+          revealLocalCardV3
+          setLocalCardBlockedV3
+          resetLocalCardSecurityV3
+          fundLocalCardV3
+          EOF
+            echo 'Fast Market-Cash local-card pair deployment selected.'
+            echo '2' > /tmp/market-cash-batch-size.txt
           elif [ "$priority_set" -eq 1 ]; then
             cat > /tmp/market-cash-functions.txt <<'EOF'
           verifyApplicationSecret
