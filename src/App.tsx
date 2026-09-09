@@ -6,6 +6,7 @@ import{doc,onSnapshot}from'firebase/firestore';
 import{auth,db}from'./firebase/config';
 import{authService}from'./services/authService';
 import{agentWalletService}from'./services/agentWalletService';
+import{localCardPairService}from'./services/localCardPairService';
 import{useAuthStore}from'./store/authStore';
 import{User,UserRole}from'./types';
 import{getHomeRouteByRole}from'./lib/roleNavigation';
@@ -19,7 +20,7 @@ import AdminDashboard from'./pages/admin/Dashboard';import AdminUsers from'./pag
 import AgencyDashboard from'./pages/agency/AgencyDashboard';import AgencyCards from'./pages/agency/AgencyCards';import AgencyRequests from'./pages/agency/AgencyRequests';import AgencyDeliveries from'./pages/agency/AgencyDeliveries';import AgencyNotifications from'./pages/agency/AgencyNotifications';import AgencyProfile from'./pages/agency/AgencyProfile';import AdminDesigner from'./pages/admin/AdminDesigner';import DesignerCards from'./pages/designer/DesignerCards';import DesignerNotifications from'./pages/designer/DesignerNotifications';import DesignerProfile from'./pages/designer/DesignerProfile';import DeliveryDashboard from'./pages/delivery/DeliveryDashboard';import DeliveryHistory from'./pages/delivery/DeliveryHistory';import DeliveryNotifications from'./pages/delivery/DeliveryNotifications';import DeliveryProfile from'./pages/delivery/DeliveryProfile';import AgentHome from'./pages/agent/AgentHome';import AgentTerminal from'./pages/agent/AgentTerminal';import AgentHistory from'./pages/agent/AgentHistory';import AgentProfile from'./pages/agent/AgentProfile';
 
 function Guard({children,allowedRoles}:{children:React.ReactNode;allowedRoles:UserRole[]}){
- const{isAuthenticated,user,loading}=useAuthStore();
+ const{isAuthenticated,user,loading,isPinVerified}=useAuthStore();
  if(loading)return <div className="flex min-h-screen items-center justify-center bg-slate-50"><div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-blue-950"/></div>;
  if(!isAuthenticated||!user)return <Navigate to="/login" replace/>;
  const suspensionActive=user.accountStatus==='suspended'&&(!user.suspendedUntil||user.suspendedUntil>Date.now());
@@ -30,6 +31,7 @@ function Guard({children,allowedRoles}:{children:React.ReactNode;allowedRoles:Us
   return <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4"><div className="w-full max-w-md rounded-3xl border bg-white p-7 text-center shadow-xl"><h1 className="text-2xl font-black">{title}</h1>{subtitle&&<p className="mt-3 text-sm text-slate-500">{subtitle}</p>}<button onClick={()=>void authService.logout()} className="mt-6 w-full rounded-2xl bg-blue-950 px-5 py-3 font-black text-white">Se déconnecter</button></div></div>;
  }
  if(!allowedRoles.includes(user.role))return <Navigate to={getHomeRouteByRole(user.role)} replace/>;
+ if(user.role==='client'&&Boolean(user.pinHash)&&!isPinVerified)return <Navigate to="/pin" replace/>;
  return <>{children}</>;
 }
 const AdminGeneralOnly=({children}:{children:React.ReactNode})=><Guard allowedRoles={['admin_general']}>{children}</Guard>;
@@ -42,7 +44,7 @@ function shouldProvisionFinancialAccess(user:User){return user.accountStatus!=='
 
 export default function App(){
  const{setFirebaseUser,setUser,setLoading}=useAuthStore();
- useEffect(()=>{let stopProfile:(()=>void)|undefined;const stopAuth=onAuthStateChanged(auth,async firebaseUser=>{stopProfile?.();stopProfile=undefined;setFirebaseUser(firebaseUser);if(firebaseUser){try{const resolved=await authService.resolveUser(firebaseUser);setUser(resolved);if(shouldProvisionFinancialAccess(resolved))void Promise.allSettled([agentWalletService.ensureWalletProfile(),agentWalletService.ensureLocalCard()]);if(resolved.role==='admin_general')void agentWalletService.resetVisaTestDataOnce().catch(()=>{});stopProfile=onSnapshot(doc(db,'users',firebaseUser.uid),snapshot=>{if(snapshot.exists())setUser({...resolved,...snapshot.data(),uid:firebaseUser.uid}as User)},()=>{})}catch{setUser(null)}}else setUser(null);setLoading(false)});return()=>{stopProfile?.();stopAuth()}},[setFirebaseUser,setUser,setLoading]);
+ useEffect(()=>{let stopProfile:(()=>void)|undefined;const stopAuth=onAuthStateChanged(auth,async firebaseUser=>{stopProfile?.();stopProfile=undefined;setFirebaseUser(firebaseUser);if(firebaseUser){try{const resolved=await authService.resolveUser(firebaseUser);setUser(resolved);if(shouldProvisionFinancialAccess(resolved))void Promise.allSettled([agentWalletService.ensureWalletProfile(),localCardPairService.ensure()]);if(resolved.role==='admin_general')void agentWalletService.resetVisaTestDataOnce().catch(()=>{});stopProfile=onSnapshot(doc(db,'users',firebaseUser.uid),snapshot=>{if(snapshot.exists())setUser({...resolved,...snapshot.data(),uid:firebaseUser.uid}as User)},()=>{})}catch{setUser(null)}}else setUser(null);setLoading(false)});return()=>{stopProfile?.();stopAuth()}},[setFirebaseUser,setUser,setLoading]);
  return <BrowserRouter><FirestoreNetworkBanner/><Toaster position="top-center"/><Routes>
   <Route path="/" element={<Home/>}/><Route path="/login" element={<Login/>}/><Route path="/register" element={<Register/>}/><Route path="/pin" element={<PinScreen/>}/>
   <Route path="/client" element={<Guard allowedRoles={['client']}><ClientLayout/></Guard>}><Route index element={<Navigate to="/client/home" replace/>}/><Route path="home" element={<ClientHome/>}/><Route path="wallet" element={<ClientWallet/>}/><Route path="wallet/send" element={<WalletAction action="send"/>}/><Route path="wallet/receive" element={<WalletAction action="receive"/>}/><Route path="wallet/pay" element={<MerchantPay/>}/><Route path="wallet/withdraw" element={<AgentWithdrawal/>}/><Route path="wallet/top-up" element={<WalletAction action="top-up"/>}/><Route path="wallet/card-topup" element={<WalletAction action="card-topup"/>}/><Route path="wallet/exchange" element={<WalletAction action="exchange"/>}/><Route path="wallet/transactions" element={<ClientTransactions/>}/><Route path="wallet/visa" element={<WalletVisa/>}/><Route path="cards" element={<CardsHub/>}/><Route path="kyc" element={<KycPageGate><ClientKyc/></KycPageGate>}/><Route path="professional-account" element={<ProfessionalAccount/>}/><Route path="settings" element={<ClientSettings/>}/><Route path="esim" element={<ComingSoonService service="e-SIM"/>}/><Route path="crypto" element={<ComingSoonService service="Crypto"/>}/><Route path="help" element={<ClientHelp/>}/><Route path="profile" element={<ClientProfile/>}/></Route>
