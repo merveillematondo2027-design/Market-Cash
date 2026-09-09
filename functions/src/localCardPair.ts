@@ -8,8 +8,8 @@ if (!getApps().length) initializeApp();
 const db = getFirestore();
 export const LOCAL_CARD_CURRENCIES = ['USD', 'CDF'] as const;
 export type LocalCardCurrency = typeof LOCAL_CARD_CURRENCIES[number];
-export const LOCAL_CARD_PREFIX = '4585020002';
-export const LOCAL_CARD_SCHEME = 'MC_LOCAL_V3_4585';
+export const LOCAL_CARD_PREFIX = '5585020002';
+export const LOCAL_CARD_SCHEME = 'MC_LOCAL_V4_5585';
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 export const legacyLocalCardId = (uid: string) => `local_${sha256(`local-card:${uid}`).slice(0, 24)}`;
 export const localCardId = (uid: string, currency: LocalCardCurrency) => `local_${currency.toLowerCase()}_${sha256(`local-card:${currency}:${uid}`).slice(0, 20)}`;
@@ -23,13 +23,6 @@ function validity(startValue?: number) {
   return { expiryStart: fmt(start), expiryEnd: fmt(end) };
 }
 
-/**
- * Every authenticated Market-Cash user is entitled to the personal wallet/card
- * layer, regardless of the professional role attached to the same account.
- * A brand-new Firebase Auth account may reach this callable a few milliseconds
- * before the client has persisted users/{uid}; provision a minimal client
- * profile server-side so card creation is never blocked by that race.
- */
 async function requireEligibleUser(uid: string) {
   const ref = db.doc(`users/${uid}`);
   let snap = await ref.get();
@@ -168,7 +161,7 @@ export async function listLocalCardSummaries(uid: string) {
     result.push({
       cardId: card.cardId, cardIdentifier: card.cardIdentifier,
       cardHolder: card.cardHolder || card.cardHolderName || 'CLIENT MARKET-CASH',
-      maskedNumber: raw ? `•••• •••• •••• ${raw.slice(-4)}` : '•••• •••• •••• ••••',
+      maskedNumber: raw ? `${raw.slice(0,4)} •••• •••• ${raw.slice(-4)}` : '5585 •••• •••• ••••',
       status: card.status || 'active', qrData: card.qrData || '',
       expiryStart: card.expiryStart || '', expiryEnd: card.expiryEnd || '',
       currency, balances: { [currency]: Number(account.data()?.availableBalance || 0) },
