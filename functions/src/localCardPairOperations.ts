@@ -11,6 +11,12 @@ const sha256 = (value: string) => createHash('sha256').update(value).digest('hex
 const walletId = (uid: string, currency: LocalCardCurrency) => `wallet_${currency.toLowerCase()}_${uid}`;
 const requireAuth = (request: any) => { const uid = String(request.auth?.uid || ''); if (!uid) throw new HttpsError('unauthenticated', 'Connexion requise.'); return uid; };
 
+function publicProvisioningError(error: unknown, uid: string) {
+  if (error instanceof HttpsError) return error;
+  console.error('[LOCAL_CARD_PAIR_V3_PROVISION_ERROR]', { uid, error });
+  return new HttpsError('internal', 'Impossible de préparer vos cartes locales pour le moment. Réessayez dans quelques secondes.');
+}
+
 async function verifyPin(uid: string, raw: unknown) {
   const pin = String(raw || '').replace(/\D/g, '');
   if (!/^\d{4,6}$/.test(pin)) throw new HttpsError('invalid-argument', 'Code secret invalide.');
@@ -35,11 +41,24 @@ async function requireCvv(uid: string, raw: unknown) {
 }
 
 export const ensureLocalCardPairV3 = onCall({ region: REGION }, async request => {
-  const uid = requireAuth(request); await ensureLocalCardPair(uid); return { ok: true, cards: await listLocalCardSummaries(uid) };
+  const uid = requireAuth(request);
+  try {
+    // listLocalCardSummaries performs provisioning itself. Calling ensure twice
+    // caused unnecessary transactions and made first-login failures harder to recover from.
+    const cards = await listLocalCardSummaries(uid);
+    return { ok: true, cards };
+  } catch (error) {
+    throw publicProvisioningError(error, uid);
+  }
 });
 
 export const getMyLocalCardPairV3 = onCall({ region: REGION }, async request => {
-  const uid = requireAuth(request); return { cards: await listLocalCardSummaries(uid) };
+  const uid = requireAuth(request);
+  try {
+    return { cards: await listLocalCardSummaries(uid) };
+  } catch (error) {
+    throw publicProvisioningError(error, uid);
+  }
 });
 
 export const revealLocalCardV3 = onCall({ region: REGION }, async request => {
