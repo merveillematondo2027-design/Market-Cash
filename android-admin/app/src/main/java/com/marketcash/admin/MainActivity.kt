@@ -17,6 +17,7 @@ import androidx.activity.ComponentActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.OAuthProvider
 
 class MainActivity : ComponentActivity() {
     private lateinit var status: TextView
@@ -58,6 +59,16 @@ class MainActivity : ComponentActivity() {
             text = "Connecter l’administrateur"
             setOnClickListener { signIn() }
         }
+        val separator = TextView(this).apply {
+            text = "OU"
+            textSize = 12f
+            gravity = android.view.Gravity.CENTER
+            setPadding(0, pad / 2, 0, pad / 2)
+        }
+        val googleLogin = Button(this).apply {
+            text = "Continuer avec Google"
+            setOnClickListener { signInWithGoogle() }
+        }
         val smsRole = Button(this).apply {
             text = "Définir Market-Cash comme application SMS"
             setOnClickListener { requestDefaultSmsRole() }
@@ -82,6 +93,8 @@ class MainActivity : ComponentActivity() {
         root.addView(email, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(password, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(login)
+        root.addView(separator)
+        root.addView(googleLogin)
         root.addView(smsRole)
         root.addView(importExisting)
         root.addView(sync)
@@ -99,14 +112,35 @@ class MainActivity : ComponentActivity() {
         FirebaseAuth.getInstance().signInWithEmailAndPassword(mail, pass)
             .addOnSuccessListener {
                 password.setText("")
-                Toast.makeText(this, "Téléphone connecté à Market-Cash.", Toast.LENGTH_SHORT).show()
-                PendingSmsStore.flush(this) { refreshStatus() }
-                refreshStatus()
+                onAdminSignedIn()
             }
             .addOnFailureListener {
                 Toast.makeText(this, it.localizedMessage ?: "Connexion impossible.", Toast.LENGTH_LONG).show()
                 refreshStatus()
             }
+    }
+
+    private fun signInWithGoogle() {
+        val auth = FirebaseAuth.getInstance()
+        val provider = OAuthProvider.newBuilder("google.com", auth).apply {
+            addCustomParameter("prompt", "select_account")
+            setScopes(listOf("email", "profile"))
+        }
+
+        Toast.makeText(this, "Ouverture de la connexion Google…", Toast.LENGTH_SHORT).show()
+        auth.startActivityForSignInWithProvider(this, provider.build())
+            .addOnSuccessListener { onAdminSignedIn() }
+            .addOnFailureListener {
+                Toast.makeText(this, it.localizedMessage ?: "Connexion Google impossible.", Toast.LENGTH_LONG).show()
+                refreshStatus()
+            }
+    }
+
+    private fun onAdminSignedIn() {
+        val account = FirebaseAuth.getInstance().currentUser?.email ?: "compte Google"
+        Toast.makeText(this, "Connecté à Market-Cash : $account", Toast.LENGTH_SHORT).show()
+        PendingSmsStore.flush(this) { refreshStatus() }
+        refreshStatus()
     }
 
     private fun importExistingPayments() {
