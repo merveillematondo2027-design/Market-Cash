@@ -12,7 +12,7 @@ android {
         applicationId = "com.marketcash.admin"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
+        versionCode = 3
         versionName = "0.2.0"
     }
 
@@ -31,6 +31,9 @@ android {
             storePassword = requireNotNull(System.getenv("ANDROID_ADMIN_KEYSTORE_PASSWORD"))
             keyAlias = "market-cash-admin"
             keyPassword = storePassword
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
         }
     }
 }
