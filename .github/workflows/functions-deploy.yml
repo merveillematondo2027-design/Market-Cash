@@ -80,6 +80,17 @@ jobs:
           echo 'Changed function sources:'
           printf '%s\n' "${function_changes[@]:-}"
 
+          payment_control_set=0
+          if [ "${#function_changes[@]}" -gt 0 ]; then
+            payment_control_set=1
+            for file in "${function_changes[@]}"; do
+              case "$file" in
+                functions/src/paymentControl.ts|functions/src/entry.ts) ;;
+                *) payment_control_set=0 ;;
+              esac
+            done
+          fi
+
           bridge_set=0
           if [ "${#function_changes[@]}" -eq 0 ]; then
             bridge_set=1
@@ -105,9 +116,7 @@ jobs:
           fi
 
           priority_set=0
-          if [ "${#function_changes[@]}" -eq 0 ]; then
-            priority_set=0
-          else
+          if [ "${#function_changes[@]}" -gt 0 ]; then
             priority_set=1
             for file in "${function_changes[@]}"; do
               case "$file" in
@@ -117,7 +126,16 @@ jobs:
             done
           fi
 
-          if [ "$bridge_set" -eq 1 ]; then
+          if [ "$payment_control_set" -eq 1 ]; then
+            cat > /tmp/market-cash-functions.txt <<'EOF'
+          paymentBridgeIngestSms
+          adminReparsePaymentSms
+          adminVerifyPaymentEvidence
+          adminConsumePaymentEvent
+          EOF
+            echo 'Focused Payment Control deployment selected.'
+            echo '2' > /tmp/market-cash-batch-size.txt
+          elif [ "$bridge_set" -eq 1 ]; then
             cat > /tmp/market-cash-functions.txt <<'EOF'
           marketCashApiCardPaymentByKey
           EOF
