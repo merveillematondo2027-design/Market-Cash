@@ -14,6 +14,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.google.firebase.auth.FirebaseAuth
@@ -24,13 +25,28 @@ class MainActivity : ComponentActivity() {
     private lateinit var email: EditText
     private lateinit var password: EditText
 
+    private val smsRoleLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        refreshStatus()
+        if (isDefaultSmsApp()) {
+            requestSmsPermissions()
+            Toast.makeText(this, "Market-Cash Admin est maintenant l’application SMS par défaut.", Toast.LENGTH_LONG).show()
+        } else {
+            Toast.makeText(this, "Market-Cash Admin n’a pas encore reçu le rôle SMS par défaut.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         FirebaseRuntime.ensure(this)
         buildUi()
-        requestSmsPermissions()
         refreshStatus()
-        PendingSmsStore.flush(this) { refreshStatus() }
+
+        // Important: Android exige que l'app demande d'abord le rôle SMS par défaut,
+        // puis seulement les permissions SMS associées à ce rôle.
+        if (isDefaultSmsApp()) {
+            requestSmsPermissions()
+            PendingSmsStore.flush(this) { refreshStatus() }
+        }
     }
 
     private fun buildUi() {
@@ -144,9 +160,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun importExistingPayments() {
+        if (!isDefaultSmsApp()) {
+            Toast.makeText(this, "Définissez d’abord Market-Cash Admin comme application SMS par défaut.", Toast.LENGTH_LONG).show()
+            requestDefaultSmsRole()
+            return
+        }
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
             requestSmsPermissions()
-            Toast.makeText(this, "Autorisez d’abord l’accès aux SMS puis relancez l’import.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Autorisez l’accès aux SMS puis relancez l’import.", Toast.LENGTH_LONG).show()
             return
         }
         if (FirebaseAuth.getInstance().currentUser == null) {
@@ -161,6 +182,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestSmsPermissions() {
+        if (!isDefaultSmsApp()) return
         val permissions = arrayOf(
             android.Manifest.permission.RECEIVE_SMS,
             android.Manifest.permission.READ_SMS,
@@ -172,17 +194,27 @@ class MainActivity : ComponentActivity() {
         if (missing.isNotEmpty()) ActivityCompat.requestPermissions(this, missing.toTypedArray(), 1001)
     }
 
+    private fun isDefaultSmsApp(): Boolean = Telephony.Sms.getDefaultSmsPackage(this) == packageName
+
     private fun requestDefaultSmsRole() {
+        if (isDefaultSmsApp()) {
+            requestSmsPermissions()
+            refreshStatus()
+            return
+        }
+
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             val roleManager = getSystemService(RoleManager::class.java)
-            if (roleManager.isRoleAvailable(RoleManager.ROLE_SMS) && !roleManager.isRoleHeld(RoleManager.ROLE_SMS)) {
-                startActivityForResult(roleManager.createRequestRoleIntent(RoleManager.ROLE_SMS), 1002)
-            } else refreshStatus()
-        } else if (Telephony.Sms.getDefaultSmsPackage(this) != packageName) {
+            if (roleManager.isRoleAvailable(RoleManager.ROLE_SMS)) {
+                smsRoleLauncher.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_SMS))
+            } else {
+                Toast.makeText(this, "Le rôle SMS n’est pas disponible sur cet appareil.", Toast.LENGTH_LONG).show()
+            }
+        } else {
             val intent = Intent(Telephony.Sms.Intents.ACTION_CHANGE_DEFAULT)
                 .putExtra(Telephony.Sms.Intents.EXTRA_PACKAGE_NAME, packageName)
-            startActivityForResult(intent, 1002)
-        } else refreshStatus()
+            smsRoleLauncher.launch(intent)
+        }
     }
 
     override fun onResume() {
@@ -192,7 +224,7 @@ class MainActivity : ComponentActivity() {
 
     private fun refreshStatus() {
         val signedIn = FirebaseAuth.getInstance().currentUser?.email ?: "non connecté"
-        val defaultSms = if (Telephony.Sms.getDefaultSmsPackage(this) == packageName) "OUI" else "NON"
+        val defaultSms = if (isDefaultSmsApp()) "OUI" else "NON"
         status.text = buildString {
             appendLine("Téléphone : ${DeviceId.get(this@MainActivity)}")
             appendLine("Compte admin : $signedIn")
