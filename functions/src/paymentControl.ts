@@ -6,6 +6,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https';
 if (!getApps().length) initializeApp();
 const db = getFirestore();
 const REGION = 'europe-west1';
+const PARSE_VERSION = 2;
 
 type PaymentProvider = 'MPESA' | 'AIRTEL_MONEY' | 'ORANGE_MONEY' | 'AFRIMONEY' | 'UNKNOWN';
 type Currency = 'USD' | 'CDF' | 'UNKNOWN';
@@ -13,6 +14,7 @@ type Currency = 'USD' | 'CDF' | 'UNKNOWN';
 const clean = (value: unknown) => String(value ?? '').trim();
 const upper = (value: unknown) => clean(value).toUpperCase();
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
+
 const normalizePhone = (value: unknown) => {
   let phone = clean(value).replace(/[^0-9+]/g, '');
   if (phone.startsWith('00243')) phone = `+${phone.slice(2)}`;
@@ -32,40 +34,59 @@ async function requireAdmin(request: any) {
 }
 
 function detectProvider(sender: string, body: string): PaymentProvider {
-  const source = `${sender} ${body}`.toLowerCase();
-  if (/m[- ]?pesa|mpesa|vodacom/.test(source)) return 'MPESA';
-  if (/airtel\s*money|airtel/.test(source)) return 'AIRTEL_MONEY';
-  if (/orange\s*money|orange/.test(source)) return 'ORANGE_MONEY';
-  if (/afrimoney|africell/.test(source)) return 'AFRIMONEY';
+  const source = `${sender} ${body}`.toLowerCase().replace(/[._]/g, ' ');
+  if (/m\s*[- ]?\s*pesa|mpesa|vodacom(?:\s*-?\s*rdc)?|m-pesa/.test(source)) return 'MPESA';
+  if (/airtel\s*(?:money)?|airtelmoney/.test(source)) return 'AIRTEL_MONEY';
+  if (/orange\s*(?:money)?|orangemoney/.test(source)) return 'ORANGE_MONEY';
+  if (/afri\s*money|afrimoney|africell/.test(source)) return 'AFRIMONEY';
   return 'UNKNOWN';
 }
 
 function parseCurrency(body: string): Currency {
-  if (/\bUSD\b|US\$|\$/i.test(body)) return 'USD';
-  if (/\bCDF\b|\bFC\b|FRANCS?\s+CONGOLAIS/i.test(body)) return 'CDF';
+  if (/\bUSD\b|US\s*\$|\$\s*US|\$/i.test(body)) return 'USD';
+  if (/\bCDF\b|\bFC\b|\bFCFA\b|FRANCS?\s+(?:CONGOLAIS|CONGOLAIS(?:ES)?)|\bFRANCS?\b/i.test(body)) return 'CDF';
   return 'UNKNOWN';
+}
+
+function parseNumber(value: string): number | null {
+  let text = value.trim().replace(/[’']/g, '').replace(/\s+/g, '');
+  if (!text) return null;
+  const lastComma = text.lastIndexOf(',');
+  const lastDot = text.lastIndexOf('.');
+  if (lastComma >= 0 && lastDot >= 0) {
+    if (lastComma > lastDot) text = text.replace(/\./g, '').replace(',', '.');
+    else text = text.replace(/,/g, '');
+  } else if (lastComma >= 0) {
+    const decimals = text.length - lastComma - 1;
+    text = decimals === 1 || decimals === 2 ? text.replace(',', '.') : text.replace(/,/g, '');
+  } else if ((text.match(/\./g) || []).length > 1) {
+    const parts = text.split('.');
+    const last = parts.pop() || '';
+    text = last.length <= 2 ? `${parts.join('')}.${last}` : `${parts.join('')}${last}`;
+  }
+  const amount = Number(text);
+  return Number.isFinite(amount) && amount >= 0 ? amount : null;
 }
 
 function parseAmount(body: string): number | null {
   const patterns = [
-    /(?:USD|US\$|\$)\s*([0-9][0-9 .,'’]*)/i,
-    /([0-9][0-9 .,'’]*)\s*(?:USD|US\$|\$|CDF|FC)\b/i,
-    /(?:montant|amount)\s*[:=-]?\s*([0-9][0-9 .,'’]*)/i,
+    /(?:montant|amount|somme|valeur)\s*[:=\-]?\s*(?:USD|US\s*\$|\$|CDF|FC)?\s*([0-9][0-9 .,'’]*)/i,
+    /(?:vous\s+avez\s+re[cç]u|vous\s+avez\s+recu|re[cç]u|recu|received|cr[eé]dit[eé]|credited)\D{0,30}(?:USD|US\s*\$|\$|CDF|FC)?\s*([0-9][0-9 .,'’]*)/i,
+    /(?:USD|US\s*\$|\$|CDF|FC)\s*([0-9][0-9 .,'’]*)/i,
+    /([0-9][0-9 .,'’]*)\s*(?:USD|US\s*\$|\$|CDF|FC)\b/i,
   ];
   for (const pattern of patterns) {
     const match = body.match(pattern);
     if (!match?.[1]) continue;
-    const normalized = match[1]
-      .replace(/[ '’]/g, '')
-      .replace(/,(?=\d{1,2}\b)/, '.')
-      .replace(/,/g, '');
-    const amount = Number(normalized);
-    if (Number.isFinite(amount) && amount >= 0) return amount;
+    const amount = parseNumber(match[1]);
+    if (amount !== null) return amount;
   }
   return null;
 }
 
 function parsePhone(body: string): string {
+  const contextual = body.match(/(?:de|from|par|exp[eé]diteur|sender|num[eé]ro|numero|t[eé]l[eé]phone|telephone)\s*[:=\-]?\s*((?:\+|00)?243[0-9\s-]{8,14}|0(?:8|9)[0-9\s-]{8,12})/i);
+  if (contextual?.[1]) return normalizePhone(contextual[1]);
   const international = body.match(/(?:\+|00)?243[0-9][0-9\s-]{7,12}/);
   if (international?.[0]) return normalizePhone(international[0]);
   const local = body.match(/\b0(?:8|9)[0-9][0-9\s-]{7,10}\b/);
@@ -73,14 +94,20 @@ function parsePhone(body: string): string {
 }
 
 function parseTransactionId(body: string): string {
-  const labelled = body.match(/(?:transaction|trans(?:action)?\s*id|reference|référence|ref(?:erence)?|id)\s*[:#=-]?\s*([A-Z0-9_-]{5,40})/i);
-  if (labelled?.[1]) return upper(labelled[1]);
-  const token = body.match(/\b(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*\d)[A-Z0-9]{8,24}\b/i);
-  return token?.[0] ? upper(token[0]) : '';
+  const labelled = body.match(/(?:transaction(?:\s*id)?|trans(?:action)?\s*id|reference|r[eé]f[eé]rence|ref|r[eé]f|trx|txid|code)\s*[:#=\-]?\s*([A-Z0-9][A-Z0-9_\-/]{4,39})/i);
+  if (labelled?.[1]) return upper(labelled[1]).replace(/[.,;:]$/, '');
+  const candidates = body.match(/\b(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*\d)[A-Z0-9]{8,24}\b/gi) || [];
+  const token = candidates.find(value => !/^243\d+$/.test(value) && !/^0[89]\d+$/.test(value));
+  return token ? upper(token) : '';
+}
+
+function looksLikeOutgoingPayment(body: string) {
+  return /vous\s+avez\s+(?:envoy[eé]|transf[eé]r[eé]|pay[eé])|you\s+(?:sent|paid|transferred)|paiement\s+(?:effectu[eé]|envoy[eé])|transfert\s+(?:effectu[eé]|envoy[eé])/i.test(body);
 }
 
 function looksLikeIncomingPayment(body: string) {
-  return /vous avez re[cç]u|you have received|received|paiement re[cç]u|payment received|cr[eé]dit[eé]|credited/i.test(body);
+  if (looksLikeOutgoingPayment(body)) return false;
+  return /vous\s+avez\s+re[cç]u|vous\s+avez\s+recu|you\s+have\s+received|received\s+(?:from|payment)|paiement\s+re[cç]u|paiement\s+recu|payment\s+received|d[eé]p[oô]t\s+re[cç]u|depot\s+recu|cr[eé]dit[eé]|credited|votre\s+compte\s+a\s+[eé]t[eé]\s+cr[eé]dit[eé]/i.test(body);
 }
 
 function parseSms(senderAddress: string, rawBody: string) {
@@ -90,7 +117,21 @@ function parseSms(senderAddress: string, rawBody: string) {
   const customerPhone = parsePhone(rawBody);
   const transactionId = parseTransactionId(rawBody);
   const incoming = looksLikeIncomingPayment(rawBody);
-  const parsed = provider !== 'UNKNOWN' && amount !== null && currency !== 'UNKNOWN' && incoming;
+  const completeCore = provider !== 'UNKNOWN' && amount !== null && currency !== 'UNKNOWN' && incoming;
+  let confidence = 0;
+  if (provider !== 'UNKNOWN') confidence += 25;
+  if (amount !== null) confidence += 25;
+  if (currency !== 'UNKNOWN') confidence += 15;
+  if (incoming) confidence += 20;
+  if (customerPhone) confidence += 8;
+  if (transactionId) confidence += 7;
+  const missing: string[] = [];
+  if (provider === 'UNKNOWN') missing.push('provider');
+  if (amount === null) missing.push('amount');
+  if (currency === 'UNKNOWN') missing.push('currency');
+  if (!incoming) missing.push('incoming_direction');
+  if (!customerPhone) missing.push('customerPhone');
+  if (!transactionId) missing.push('transactionId');
   return {
     provider,
     amount,
@@ -98,7 +139,10 @@ function parseSms(senderAddress: string, rawBody: string) {
     customerPhone,
     transactionId,
     direction: incoming ? 'incoming' : 'unknown',
-    parseStatus: parsed ? 'ready' : 'review',
+    parseStatus: completeCore ? 'ready' : 'review',
+    parseConfidence: confidence,
+    parseMissing: missing,
+    parseVersion: PARSE_VERSION,
   };
 }
 
@@ -142,10 +186,48 @@ export const paymentBridgeIngestSms = onCall({ region: REGION }, async request =
     actorId,
     action: 'PAYMENT_SMS_INGESTED',
     result: 'success',
-    metadata: { eventId: ref.id, provider: parsed.provider, parseStatus: parsed.parseStatus, deviceId },
+    metadata: { eventId: ref.id, provider: parsed.provider, parseStatus: parsed.parseStatus, parseConfidence: parsed.parseConfidence, deviceId },
     createdAt: now,
   });
   return { ok: true, duplicate: false, eventId: ref.id, event };
+});
+
+export const adminReparsePaymentSms = onCall({ region: REGION }, async request => {
+  const actorId = await requireAdmin(request);
+  const requestedLimit = Math.max(1, Math.min(500, Number(request.data?.limit || 500)));
+  const snap = await db.collection('payment_sms_events').orderBy('receivedAt', 'desc').limit(requestedLimit).get();
+  let scanned = 0;
+  let updated = 0;
+  let ready = 0;
+  let review = 0;
+  let batch = db.batch();
+  let operations = 0;
+  const commitBatch = async () => {
+    if (!operations) return;
+    await batch.commit();
+    batch = db.batch();
+    operations = 0;
+  };
+  for (const doc of snap.docs) {
+    const data = doc.data();
+    const rawBody = clean(data.rawBody);
+    if (!rawBody) continue;
+    scanned += 1;
+    const parsed = parseSms(clean(data.senderAddress), rawBody);
+    if (parsed.parseStatus === 'ready') ready += 1; else review += 1;
+    batch.update(doc.ref, {
+      ...parsed,
+      status: data.consumed ? 'consumed' : parsed.parseStatus === 'ready' ? 'received' : 'review',
+      reparsedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    updated += 1;
+    operations += 1;
+    if (operations >= 400) await commitBatch();
+  }
+  await commitBatch();
+  await db.collection('audit_events').add({ actorId, action: 'PAYMENT_SMS_REPARSED', result: 'success', metadata: { scanned, updated, ready, review, parseVersion: PARSE_VERSION }, createdAt: Date.now() });
+  return { ok: true, scanned, updated, ready, review, parseVersion: PARSE_VERSION };
 });
 
 export const adminVerifyPaymentEvidence = onCall({ region: REGION }, async request => {
