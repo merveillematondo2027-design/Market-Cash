@@ -12,14 +12,15 @@ class SmsReceiver : BroadcastReceiver() {
         if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION &&
             intent.action != Telephony.Sms.Intents.SMS_DELIVER_ACTION) return
 
+        FirebaseRuntime.ensure(context)
         val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
         if (messages.isEmpty()) return
 
         val sender = messages.firstOrNull()?.originatingAddress.orEmpty()
         val body = messages.joinToString(separator = "") { it.messageBody.orEmpty() }
         val receivedAt = messages.maxOfOrNull { it.timestampMillis } ?: System.currentTimeMillis()
-        val simSlot = intent.getIntExtra("slot", intent.getIntExtra("slot_id", -1))
-        val subscriptionId = intent.getIntExtra("subscription", intent.getIntExtra("subscription_id", -1))
+        val simSlot = firstIntExtra(intent, "slot", "slot_id", "simSlot", "simSlotIndex")
+        val subscriptionId = firstIntExtra(intent, "subscription", "subscription_id", "subscriptionId")
         val deviceId = DeviceId.get(context)
 
         val payload = mapOf(
@@ -45,5 +46,12 @@ class SmsReceiver : BroadcastReceiver() {
                 PendingSmsStore.save(context, payload)
                 pending.finish()
             }
+    }
+
+    private fun firstIntExtra(intent: Intent, vararg names: String): Int {
+        for (name in names) {
+            if (intent.hasExtra(name)) return intent.getIntExtra(name, -1)
+        }
+        return -1
     }
 }
