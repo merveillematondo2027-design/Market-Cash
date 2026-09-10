@@ -62,6 +62,10 @@ class MainActivity : ComponentActivity() {
             text = "Définir Market-Cash comme application SMS"
             setOnClickListener { requestDefaultSmsRole() }
         }
+        val importExisting = Button(this).apply {
+            text = "Importer les SMS de paiement existants"
+            setOnClickListener { importExistingPayments() }
+        }
         val sync = Button(this).apply {
             text = "Synchroniser les SMS en attente"
             setOnClickListener { PendingSmsStore.flush(this@MainActivity) { refreshStatus() } }
@@ -79,6 +83,7 @@ class MainActivity : ComponentActivity() {
         root.addView(password, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(login)
         root.addView(smsRole)
+        root.addView(importExisting)
         root.addView(sync)
         root.addView(logout)
         setContentView(ScrollView(this).apply { addView(root) })
@@ -104,10 +109,28 @@ class MainActivity : ComponentActivity() {
             }
     }
 
+    private fun importExistingPayments() {
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+            requestSmsPermissions()
+            Toast.makeText(this, "Autorisez d’abord l’accès aux SMS puis relancez l’import.", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (FirebaseAuth.getInstance().currentUser == null) {
+            Toast.makeText(this, "Connectez d’abord le compte administrateur.", Toast.LENGTH_LONG).show()
+            return
+        }
+        Toast.makeText(this, "Recherche des SMS de paiement des 30 derniers jours…", Toast.LENGTH_SHORT).show()
+        SmsInboxImporter.importRecentPayments(this) { imported, failed ->
+            Toast.makeText(this, "$imported SMS synchronisés${if (failed > 0) ", $failed en attente" else ""}.", Toast.LENGTH_LONG).show()
+            refreshStatus()
+        }
+    }
+
     private fun requestSmsPermissions() {
         val permissions = arrayOf(
             android.Manifest.permission.RECEIVE_SMS,
-            android.Manifest.permission.READ_SMS
+            android.Manifest.permission.READ_SMS,
+            android.Manifest.permission.SEND_SMS
         )
         val missing = permissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
