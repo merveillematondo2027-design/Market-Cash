@@ -30,10 +30,21 @@ jobs:
           ANDROID_ADMIN_KEYSTORE_BASE64: ${{ secrets.ANDROID_ADMIN_KEYSTORE_BASE64 }}
           ANDROID_ADMIN_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_ADMIN_KEYSTORE_PASSWORD }}
         run: bash android-admin/ci/restore-signing-key.sh
+      - name: Verify persistent signing SHA fingerprints
+        env:
+          ANDROID_ADMIN_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_ADMIN_KEYSTORE_PASSWORD }}
+        run: |
+          keytool -list -v \
+            -keystore "$ANDROID_ADMIN_KEYSTORE_PATH" \
+            -storetype PKCS12 \
+            -storepass "$ANDROID_ADMIN_KEYSTORE_PASSWORD" \
+            -alias market-cash-admin | grep -E 'SHA1:|SHA256:'
       - name: Build internal debug APK
         env:
           ANDROID_ADMIN_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_ADMIN_KEYSTORE_PASSWORD }}
         run: gradle -p android-admin :app:assembleDebug
+      - name: Verify built APK signing certificate
+        run: apksigner verify --print-certs android-admin/app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@v4
         with:
           name: market-cash-admin-debug
