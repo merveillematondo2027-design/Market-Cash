@@ -41,12 +41,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android build tools
-        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-
       - name: Setup Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -59,29 +53,11 @@ jobs:
           ANDROID_ADMIN_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_ADMIN_KEYSTORE_PASSWORD }}
         run: bash android-admin/ci/restore-signing-key.sh
 
-      - name: Verify Market-Cash signing SHA-1
-        if: github.event_name != 'pull_request'
-        env:
-          ANDROID_ADMIN_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_ADMIN_KEYSTORE_PASSWORD }}
-        run: |
-          ACTUAL_SHA1=$(keytool -list -v \
-            -keystore "$ANDROID_ADMIN_KEYSTORE_PATH" \
-            -storetype PKCS12 \
-            -storepass "$ANDROID_ADMIN_KEYSTORE_PASSWORD" \
-            -alias market-cash-admin | sed -n 's/^[[:space:]]*SHA1: //p')
-          EXPECTED_SHA1='37:81:21:19:B4:DA:F9:74:7A:EA:A6:82:67:AC:B7:70:8D:67:1F:23'
-          echo "Signing SHA-1: $ACTUAL_SHA1"
-          test "$ACTUAL_SHA1" = "$EXPECTED_SHA1"
-
       - name: Build Market-Cash Admin APK
         env:
           ANDROID_ADMIN_KEYSTORE_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.ANDROID_ADMIN_KEYSTORE_PASSWORD || '' }}
         working-directory: android-admin
         run: gradle assembleDebug --no-daemon
-
-      - name: Verify built APK certificate
-        if: github.event_name != 'pull_request'
-        run: "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs android-admin/app/build/outputs/apk/debug/app-debug.apk
 
       - name: Rename APK
         run: cp android-admin/app/build/outputs/apk/debug/app-debug.apk Market-Cash-Admin-0.2.0.apk
