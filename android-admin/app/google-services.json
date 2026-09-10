@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "153173040202-i3kqlij08u40uhv5jkq3g3rjn7ufo3kf.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.marketcash.admin",
+            "certificate_hash": "37812119b4daf9747aeaa68267acb7708d671f23"
+          }
+        },
+        {
           "client_id": "153173040202-8tbrf9mb3ufo27qlepr01kbg98kke4tq.apps.googleusercontent.com",
           "client_type": 3
         }
