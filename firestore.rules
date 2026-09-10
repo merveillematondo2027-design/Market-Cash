@@ -181,6 +181,10 @@ service cloud.firestore {
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow update: if false;
     }
+    match /payment_sms_events/{eventId} {
+      allow read: if isAdminGeneral();
+      allow create,update,delete: if false;
+    }
 
     // Les collections monétaires restent exclusivement gérées par les Cloud Functions
     // (wallet_accounts, wallet_transactions, ledger_entries, card_wallet_accounts,
