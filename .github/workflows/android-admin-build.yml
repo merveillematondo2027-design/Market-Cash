@@ -2,12 +2,6 @@ name: Android Admin APK
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - "android-admin/**"
-      - ".github/workflows/android-admin-build.yml"
 
 jobs:
   build:
