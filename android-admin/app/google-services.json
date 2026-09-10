@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "153173040202",
+    "project_id": "automarket-fintech",
+    "storage_bucket": "automarket-fintech.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:153173040202:android:cf1f34367e19fb58739ab3",
+        "android_client_info": {
+          "package_name": "com.marketcash.admin"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "153173040202-5run48dukdphujt81ta3mr3dssibmr0i.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.marketcash.admin",
+            "certificate_hash": "28cfc38342efeef071b68b31695f36e8b57d6434"
+          }
+        },
+        {
+          "client_id": "153173040202-8tbrf9mb3ufo27qlepr01kbg98kke4tq.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD8dIPvNWxDY-kicyBimLvuhUb0KAixMV4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "153173040202-8tbrf9mb3ufo27qlepr01kbg98kke4tq.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
