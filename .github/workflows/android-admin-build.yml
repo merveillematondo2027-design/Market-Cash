@@ -3,10 +3,11 @@ name: Android Admin APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
-      - 'android-admin/**'
-      - '.github/workflows/android-admin-build.yml'
+      - "android-admin/**"
+      - ".github/workflows/android-admin-build.yml"
 
 jobs:
   build:
@@ -20,13 +21,13 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
       - uses: android-actions/setup-android@v3
       - name: Install Android SDK 36
-        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.11.1'
+          gradle-version: "8.11.1"
       - name: Restore persistent Android signing key
         env:
           ANDROID_ADMIN_KEYSTORE_BASE64: ${{ secrets.ANDROID_ADMIN_KEYSTORE_BASE64 }}
@@ -40,7 +41,7 @@ jobs:
             -keystore "$ANDROID_ADMIN_KEYSTORE_PATH" \
             -storetype PKCS12 \
             -storepass "$ANDROID_ADMIN_KEYSTORE_PASSWORD" \
-            -alias market-cash-admin | grep -E 'SHA1:|SHA256:'
+            -alias market-cash-admin | grep -E "SHA1:|SHA256:"
       - name: Build internal debug APK
         env:
           ANDROID_ADMIN_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_ADMIN_KEYSTORE_PASSWORD }}
