@@ -21,6 +21,18 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+
+    // CI uses a persistent key so Google OAuth and APK updates keep the same identity.
+    val ciKeystore = System.getenv("ANDROID_ADMIN_KEYSTORE_PATH")
+    if (!ciKeystore.isNullOrBlank()) {
+        signingConfigs.getByName("debug") {
+            storeFile = file(ciKeystore)
+            storeType = "PKCS12"
+            storePassword = requireNotNull(System.getenv("ANDROID_ADMIN_KEYSTORE_PASSWORD"))
+            keyAlias = "market-cash-admin"
+            keyPassword = storePassword
+        }
+    }
 }
 
 dependencies {

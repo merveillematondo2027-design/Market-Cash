@@ -46,7 +46,16 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
+      - name: Restore persistent Android signing key
+        if: github.event_name != 'pull_request'
+        env:
+          ANDROID_ADMIN_KEYSTORE_BASE64: ${{ secrets.ANDROID_ADMIN_KEYSTORE_BASE64 }}
+          ANDROID_ADMIN_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_ADMIN_KEYSTORE_PASSWORD }}
+        run: bash android-admin/ci/restore-signing-key.sh
+
       - name: Build Market-Cash Admin APK
+        env:
+          ANDROID_ADMIN_KEYSTORE_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.ANDROID_ADMIN_KEYSTORE_PASSWORD || '' }}
         working-directory: android-admin
         run: gradle assembleDebug --no-daemon
 
@@ -54,6 +63,7 @@ jobs:
         run: cp android-admin/app/build/outputs/apk/debug/app-debug.apk Market-Cash-Admin-0.2.0.apk
 
       - name: Upload Market-Cash Admin APK
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: Market-Cash-Admin-0.2.0
