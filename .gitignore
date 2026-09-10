@@ -6,3 +6,10 @@ coverage/
 *.log
 .env*
 !.env.example
+.gradle/
+**/.gradle/
+**/local.properties
+**/google-services.json
+**/build/
+*.jks
+*.keystore
