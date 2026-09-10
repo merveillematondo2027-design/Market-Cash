@@ -7,7 +7,7 @@ Market-Cash devient le centre de contrôle des paiements Mobile Money. Une preuv
 ## Architecture
 
 1. Le téléphone administratif Market-Cash reçoit le SMS opérateur.
-2. La future couche Android native Market-Cash transmet le SMS au callable `paymentBridgeIngestSms`.
+2. La couche Android native interne `android-admin` reçoit le SMS et le transmet au callable `paymentBridgeIngestSms`.
 3. Le backend normalise le fournisseur, le montant, la devise, le numéro client et la référence transaction.
 4. Le document est conservé dans `payment_sms_events` avec une empreinte SHA-256 anti-doublon.
 5. L'administrateur ouvre **Admin > Contrôle paiements**.
@@ -54,7 +54,7 @@ Le frontend admin dispose uniquement du droit de lecture. Les écritures passent
 
 ### `paymentBridgeIngestSms`
 
-Ingestion d'un SMS reçu sur le téléphone Market-Cash. V1 est protégée par le rôle `admin_general`. Avant utilisation en production sur un téléphone dédié, la V2 remplacera cette authentification interactive par l'enrôlement de l'appareil et une signature cryptographique de chaque événement.
+Ingestion d'un SMS reçu sur le téléphone Market-Cash. La V1 est protégée par le rôle `admin_general` et la couche Android conserve localement les événements qui n'ont pas pu être synchronisés. Une V2 ajoutera l'enrôlement cryptographique de l'appareil et la signature de chaque événement.
 
 ### `adminVerifyPaymentEvidence`
 
@@ -72,25 +72,31 @@ Recherche une correspondance et produit un score basé sur :
 
 Marque atomiquement une transaction comme utilisée. Toute deuxième tentative échoue, ce qui empêche la réutilisation d'une preuve réelle sur plusieurs commandes.
 
+## Couche Android interne intégrée
+
+Le dossier `android-admin` appartient au même dépôt Market-Cash. Il ne s'agit pas d'un second produit indépendant : c'est la variante Android administrateur de Market-Cash destinée au téléphone de contrôle des paiements.
+
+Fonctions déjà intégrées :
+
+- demande du rôle application SMS par défaut ;
+- permissions `RECEIVE_SMS` et `READ_SMS` ;
+- réception automatique via `SMS_DELIVER` / `SMS_RECEIVED` ;
+- récupération de l'expéditeur, du corps, de l'heure, du slot SIM et de la subscription ;
+- identifiant persistant du téléphone Market-Cash ;
+- transmission vers `paymentBridgeIngestSms` ;
+- file locale `PendingSmsStore` lorsque Firebase ou Internet n'est pas disponible ;
+- reprise de synchronisation à la prochaine ouverture de l'application.
+
+Le fichier Firebase Android `google-services.json` doit être fourni uniquement dans l'environnement de build et ne doit pas être versionné publiquement.
+
 ## Règles de sécurité
 
 - Le SMS original n'est visible que par l'administrateur général.
 - Aucun utilisateur client ne peut écrire dans `payment_sms_events`.
 - Une capture d'écran n'est jamais une source d'autorité.
 - Une transaction consommée ne peut pas être réutilisée.
-- La future couche Android doit enregistrer le téléphone, signer les événements et fonctionner en file d'attente hors ligne.
-
-## Prochaine couche Android
-
-Market-Cash reste un seul produit. La PWA actuelle demeure l'interface principale, tandis qu'une couche Android native interne sera ajoutée au même dépôt pour le téléphone administratif. Elle devra :
-
-- pouvoir être choisie comme application SMS par défaut sur le téléphone dédié ;
-- recevoir les SMS entrants ;
-- identifier la SIM / subscription ;
-- conserver une copie locale sécurisée ;
-- synchroniser les événements vers Market-Cash ;
-- reprendre automatiquement la synchronisation après une coupure Internet ;
-- ne transmettre au cloud que les SMS reconnus comme liés aux paiements.
+- Les SMS non synchronisés restent dans la file locale jusqu'à reprise de connexion.
+- L'étape suivante de sécurité est l'enrôlement de l'appareil et la signature cryptographique des événements.
 
 ## Principe de crédit
 
