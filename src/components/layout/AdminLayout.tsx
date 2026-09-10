@@ -15,6 +15,7 @@ export default function AdminLayout(){
     {name:'Clients & Wallets',path:'/admin/users',icon:WalletCards,group:'Pilotage'},
     {name:'KYC & Comptes',path:'/admin/account-requests',icon:ShieldCheck,group:'Pilotage'},
     {name:'Agents & Float',path:'/admin/agents',icon:HandCoins,group:'Réseau'},
+    {name:'Contrôle paiements',path:'/admin/payment-control',icon:Shield,group:'Opérations'},
     {name:'Demandes',path:'/admin/requests',icon:FileClock,group:'Opérations'},
     {name:'Stock cartes',path:'/admin/stock',icon:Boxes,group:'Opérations'},
     {name:'Livraisons',path:'/admin/deliveries',icon:Truck,group:'Opérations'},
