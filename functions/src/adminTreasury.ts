@@ -66,3 +66,5 @@ export const adjustAdminTreasury=onCall({region:REGION},async request=>{
     return {ok:true,reference,transactionId:txId,balance:current+delta};
   });
 });
+
+// Treasury deployment marker: focused admin wallet release.
