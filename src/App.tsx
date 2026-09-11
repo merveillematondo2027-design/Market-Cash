@@ -30,6 +30,7 @@ function Guard({children,allowedRoles}:{children:React.ReactNode;allowedRoles:Us
   const subtitle=suspensionActive&&user.suspendedUntil?`Accès suspendu jusqu’au ${new Date(user.suspendedUntil).toLocaleString('fr-FR')}.`:user.accountStatus==='banned'?'Cette adresse e-mail ne peut plus utiliser Market-Cash.':'';
   return <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4"><div className="w-full max-w-md rounded-3xl border bg-white p-7 text-center shadow-xl"><h1 className="text-2xl font-black">{title}</h1>{subtitle&&<p className="mt-3 text-sm text-slate-500">{subtitle}</p>}<button onClick={()=>void authService.logout()} className="mt-6 w-full rounded-2xl bg-blue-950 px-5 py-3 font-black text-white">Se déconnecter</button></div></div>;
  }
+ if(user.mustChangePin)return <Navigate to="/pin" replace/>;
  if(!allowedRoles.includes(user.role))return <Navigate to={getHomeRouteByRole(user.role)} replace/>;
  if(user.role==='client'&&Boolean(user.pinHash)&&!isPinVerified)return <Navigate to="/pin" replace/>;
  return <>{children}</>;
