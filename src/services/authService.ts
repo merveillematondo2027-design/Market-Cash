@@ -1,6 +1,6 @@
 import { logService } from './logService';
 import { auth, db, googleProvider, functions } from '../firebase/config';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, signOut, updateProfile, User as FirebaseUser } from 'firebase/auth';
+import { createUserWithEmailAndPassword, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup, signOut, updateProfile, User as FirebaseUser } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { User, UserRole } from '../types';
@@ -76,59 +76,33 @@ export const authService={
         const snapshot=await getDoc(userRef);
         if(!snapshot.exists()){
           const newUser=buildSessionUser(firebaseUser,additionalData);
-          try{
-            await setDoc(userRef,removeUndefined(newUser));
-            logService.success('AUTH','USER_PROFILE_CREATED','Profil utilisateur créé',{userId:uid,userEmail:email,userRole:newUser.role});
-          }catch(error:any){
-            if(!isFirestoreAccessError(error))throw error;
-            console.warn('[USER_PROFILE_CREATE_DEFERRED]',{uid,code:error?.code});
-          }
+          try{await setDoc(userRef,removeUndefined(newUser));logService.success('AUTH','USER_PROFILE_CREATED','Profil utilisateur créé',{userId:uid,userEmail:email,userRole:newUser.role});}
+          catch(error:any){if(!isFirestoreAccessError(error))throw error;console.warn('[USER_PROFILE_CREATE_DEFERRED]',{uid,code:error?.code});}
           return newUser;
         }
-
         const stored=snapshot.data() as User;
         const expiredSuspension=stored.accountStatus==='suspended'&&Number(stored.suspendedUntil||0)>0&&Number(stored.suspendedUntil)<=Date.now();
         const data:User={...buildSessionUser(firebaseUser,additionalData),...stored,uid:stored.uid||uid,email:stored.email||email,displayName:stored.displayName||firebaseUser.displayName||email.split('@')[0]||'Utilisateur',phone:stored.phone||firebaseUser.phoneNumber||'',avatar:stored.avatar||firebaseUser.photoURL||'',pinHash:stored.pinHash||'',kycStatus:stored.kycStatus||'not_started',createdAt:stored.createdAt||Date.now(),updatedAt:stored.updatedAt||Date.now()};
         if(expiredSuspension){data.accountStatus='active';data.suspendedUntil=0;data.updatedAt=Date.now();try{await setDoc(userRef,{accountStatus:'active',suspendedUntil:0,updatedAt:data.updatedAt},{merge:true})}catch{}}
-
-        if(email.toLowerCase()===ADMIN_EMAIL.toLowerCase()&&data.role!=='admin_general'){
-          data.role='admin_general';data.updatedAt=Date.now();
-          try{await setDoc(userRef,{role:'admin_general',updatedAt:data.updatedAt},{merge:true})}catch(error:any){if(!isFirestoreAccessError(error))throw error}
-        }
-
+        if(email.toLowerCase()===ADMIN_EMAIL.toLowerCase()&&data.role!=='admin_general'){data.role='admin_general';data.updatedAt=Date.now();try{await setDoc(userRef,{role:'admin_general',updatedAt:data.updatedAt},{merge:true})}catch(error:any){if(!isFirestoreAccessError(error))throw error}}
         logService.success('AUTH','USER_PROFILE_FOUND','Profil utilisateur trouvé',{userId:data.uid,userEmail:data.email,userRole:data.role});
         return data;
-      }catch(error:any){
-        if(!isFirestoreAccessError(error))throw error;
-        const fallback=buildSessionUser(firebaseUser,additionalData);
-        console.warn('[USER_PROFILE_FALLBACK]',{uid,email,code:error?.code,message:error?.message});
-        return fallback;
-      }finally{resolvingUsers.delete(uid)}
+      }catch(error:any){if(!isFirestoreAccessError(error))throw error;const fallback=buildSessionUser(firebaseUser,additionalData);console.warn('[USER_PROFILE_FALLBACK]',{uid,email,code:error?.code,message:error?.message});return fallback;}
+      finally{resolvingUsers.delete(uid)}
     })();
     resolvingUsers.set(uid,resolvePromise);return resolvePromise;
   },
 
   async register(email:string,password:string,displayName:string,phone:string){
-    const cleanEmail=email.trim();
-    await assertEmailAllowed(cleanEmail);
-    const result=await createUserWithEmailAndPassword(auth,cleanEmail,password);
+    const cleanEmail=email.trim();await assertEmailAllowed(cleanEmail);const result=await createUserWithEmailAndPassword(auth,cleanEmail,password);
     if(displayName.trim())try{await updateProfile(result.user,{displayName:displayName.trim()})}catch{}
     const newUser=buildSessionUser(result.user,{displayName:displayName.trim()||'Client',phone:phone.trim()||''});
-    try{
-      await setDoc(doc(db,'users',result.user.uid),removeUndefined(newUser));
-    }catch(error:any){
-      if(!isFirestoreAccessError(error))throw error;
-      console.warn('[REGISTER_PROFILE_WRITE_DEFERRED]',{uid:result.user.uid,code:error?.code});
-    }
+    try{await setDoc(doc(db,'users',result.user.uid),removeUndefined(newUser));}catch(error:any){if(!isFirestoreAccessError(error))throw error;console.warn('[REGISTER_PROFILE_WRITE_DEFERRED]',{uid:result.user.uid,code:error?.code});}
     return{firebaseUser:result.user,user:newUser};
   },
 
-  async login(email:string,password:string){
-    const cleanEmail=email.trim();await assertEmailAllowed(cleanEmail);
-    const result=await signInWithEmailAndPassword(auth,cleanEmail,password);
-    const userDoc=await this.resolveUser(result.user);
-    return{firebaseUser:result.user,user:userDoc};
-  },
+  async login(email:string,password:string){const cleanEmail=email.trim();await assertEmailAllowed(cleanEmail);const result=await signInWithEmailAndPassword(auth,cleanEmail,password);const userDoc=await this.resolveUser(result.user);return{firebaseUser:result.user,user:userDoc};},
   async loginWithGoogle(){googleProvider.setCustomParameters({prompt:'select_account'});const result=await signInWithPopup(auth,googleProvider);try{await assertEmailAllowed(result.user.email||'')}catch(error){await signOut(auth);throw error}const userDoc=await this.resolveUser(result.user);return{firebaseUser:result.user,user:userDoc}},
+  async resetPassword(email:string){const cleanEmail=email.trim().toLowerCase();if(!cleanEmail||!cleanEmail.includes('@'))throw Object.assign(new Error('Adresse e-mail invalide.'),{code:'auth/invalid-email'});await assertEmailAllowed(cleanEmail);await sendPasswordResetEmail(auth,cleanEmail,{url:`${window.location.origin}/login`,handleCodeInApp:false});return{ok:true};},
   async logout(){await signOut(auth);if(typeof window!=='undefined'){try{localStorage.removeItem('market_cash_user');sessionStorage.clear()}catch{}}}
 };
