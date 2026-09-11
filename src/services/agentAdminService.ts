@@ -39,8 +39,10 @@ export interface AgentAdminDetails {
 
 const getDetails=httpsCallable<{agentUid:string},AgentAdminDetails>(functions,'adminGetAgentDetails');
 const fund=httpsCallable<{agentUid:string;currency:WalletCurrency;amount:number;reason:string},{ok:boolean;transactionId:string;reference:string;wallets:AgentAdminDetails['wallets']}>(functions,'adminFundAgentFloatV2');
+const reduce=httpsCallable<{agentUid:string;currency:WalletCurrency;amount:number;reason:string},{ok:boolean;transactionId:string;reference:string;wallets:AgentAdminDetails['wallets']}>(functions,'adminReduceAgentFloatV2');
 
 export const agentAdminService={
   getDetails:async(agentUid:string)=>(await getDetails({agentUid})).data,
   fund:async(input:{agentUid:string;currency:WalletCurrency;amount:number;reason:string})=>(await fund(input)).data,
+  reduce:async(input:{agentUid:string;currency:WalletCurrency;amount:number;reason:string})=>(await reduce(input)).data,
 };
