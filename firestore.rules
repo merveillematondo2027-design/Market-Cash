@@ -149,6 +149,10 @@ service cloud.firestore {
         || (isDesignerGraphique() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['printStatus','printedAt','printedBy','updatedAt','printFileUrl','cardDesignUrl','designUrl']))
         || (isSignedIn() && resource.data.userId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']));
     }
+    match /local_cards/{cardId} {
+      allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isStaff();
+      allow create,update,delete: if false;
+    }
     match /card_purchase_requests/{requestId} {
       allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isChefAgence();
       allow create: if isSignedIn()
