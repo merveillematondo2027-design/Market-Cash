@@ -79,11 +79,10 @@ export const adminProvisionLocalCardPairsV3 = onCall({ region: REGION, timeoutSe
 export const provisionLocalCardsOnUserCreatedV3 = onDocumentCreated({
   region: REGION,
   document: 'users/{uid}',
-  retry: true,
 }, async event => {
   const snap = event.data;
   if (!snap || !isEligible(snap.data())) return;
   await ensureLocalCardPair(event.params.uid);
 });
 
-// Deployment marker: local-card provisioning v3.
+// Deployment marker: local-card provisioning v3 no-retry.
