@@ -7,7 +7,19 @@ import { ensureLocalCardPair } from './localCardPair';
 if (!getApps().length) initializeApp();
 const db = getFirestore();
 const REGION = 'europe-west1';
-const ELIGIBLE_ROLES = new Set(['client', 'agent', 'marchand', 'developer', 'api_partner', 'creator']);
+const ELIGIBLE_ROLES = new Set([
+  'client',
+  'agent',
+  'marchand',
+  'developer',
+  'api_partner',
+  'creator',
+  'agent_administratif',
+  'admin_general',
+  'chef_agence',
+  'designer_graphique',
+  'livreur',
+]);
 const BLOCKED_STATUSES = new Set(['blocked', 'suspended', 'banned', 'deleted']);
 
 async function requireAdmin(uid: string) {
@@ -85,4 +97,4 @@ export const provisionLocalCardsOnUserCreatedV3 = onDocumentCreated({
   await ensureLocalCardPair(event.params.uid);
 });
 
-// Deployment marker: local-card provisioning v3 no-retry.
+// Deployment marker: all active Market-Cash roles receive USD/CDF local-card pairs.
