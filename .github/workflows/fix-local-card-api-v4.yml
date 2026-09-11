@@ -1,0 +1,39 @@
+name: Fix current local-card API validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-local-card-api-v4.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch API to current local-card V4 scheme
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('functions/src/apiKeyCardPayment.ts')
+          s = p.read_text()
+          s = s.replace("import { onRequest } from 'firebase-functions/v2/https';", "import { onRequest } from 'firebase-functions/v2/https';\nimport { localCardId, type LocalCardCurrency } from './localCardPair';")
+          s = s.replace("const localCardIdForUid=(uid:string)=>`local_${sha256(`local-card:${uid}`).slice(0,24)}`;\n", "")
+          s = s.replace('4585020002', '5585020002')
+          old = "const uid=String(registry.data()?.userId||'').trim();if(!uid)return null;const cardId=localCardIdForUid(uid),cardDoc=await db.doc(`local_cards/${cardId}`).get();"
+          new = "const uid=String(registry.data()?.userId||'').trim();if(!uid)return null;const currency=String(registry.data()?.currency||'').toUpperCase() as LocalCardCurrency;if(currency!=='USD'&&currency!=='CDF')return null;const cardId=localCardId(uid,currency),cardDoc=await db.doc(`local_cards/${cardId}`).get();"
+          if old not in s:
+              raise SystemExit('Legacy card identity block not found')
+          s = s.replace(old, new)
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add functions/src/apiKeyCardPayment.ts
+          git commit -m "Support Market-Cash V4 5585 local cards in API"
+          git push
