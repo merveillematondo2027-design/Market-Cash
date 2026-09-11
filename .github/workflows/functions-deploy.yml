@@ -93,6 +93,18 @@ jobs:
             for file in "${function_changes[@]}"; do case "$file" in functions/src/localCardPair.ts|functions/src/localCardPairOperations.ts|functions/src/adminLocalCardProvisioning.ts) local_pair_file_seen=1 ;; functions/src/entry.ts) ;; *) local_pair_set=0 ;; esac; done
             [ "$local_pair_file_seen" -eq 1 ] || local_pair_set=0
           fi
+          admin_balance_set=0; admin_balance_file_seen=0
+          if [ "${#function_changes[@]}" -gt 0 ]; then
+            admin_balance_set=1
+            for file in "${function_changes[@]}"; do
+              case "$file" in
+                functions/src/adminWalletAdjustments.ts|functions/src/agentAdmin.ts) admin_balance_file_seen=1 ;;
+                functions/src/entry.ts) ;;
+                *) admin_balance_set=0 ;;
+              esac
+            done
+            [ "$admin_balance_file_seen" -eq 1 ] || admin_balance_set=0
+          fi
           priority_set=0; priority_file_seen=0
           if [ "${#function_changes[@]}" -gt 0 ]; then
             priority_set=1
@@ -119,6 +131,24 @@ jobs:
             echo '2' > /tmp/market-cash-batch-size.txt
           elif [ "$bridge_set" -eq 1 ]; then
             echo marketCashApiCardPaymentByKey > /tmp/market-cash-functions.txt; echo '1' > /tmp/market-cash-batch-size.txt
+          elif [ "$admin_balance_set" -eq 1 ]; then
+            cat > /tmp/market-cash-functions.txt <<'EOF'
+          adminAdjustUserWalletBalance
+          getMyAgentAccountSnapshot
+          adminGetAgentDetails
+          adminFundAgentFloatV2
+          adminReduceAgentFloatV2
+          ensureLocalCardPairV3
+          getMyLocalCardPairV3
+          revealLocalCardV3
+          setLocalCardBlockedV3
+          resetLocalCardSecurityV3
+          fundLocalCardV3
+          adminProvisionLocalCardPairsV3
+          provisionLocalCardsOnUserCreatedV3
+          EOF
+            echo 'Focused admin balances + local-card deployment selected.'
+            echo '2' > /tmp/market-cash-batch-size.txt
           elif [ "$local_pair_set" -eq 1 ]; then
             cat > /tmp/market-cash-functions.txt <<'EOF'
           ensureLocalCardPairV3
