@@ -31,6 +31,7 @@ export interface AdminUserControlSnapshot {
 
 const getControl = httpsCallable<{targetUid:string},AdminUserControlSnapshot>(functions,'adminGetUserControl');
 const updateControl = httpsCallable<Record<string,unknown>,{ok:boolean;changed?:number;suspendedUntil?:number;role?:UserRole;displayName?:string;phone?:string}>(functions,'adminUpdateUserControl');
+const adjustWallet = httpsCallable<{targetUid:string;currency:'USD'|'CDF';direction:'credit'|'debit';amount:number;reason:string},{ok:boolean;transactionId:string;reference:string;balanceAfter:number;currency:'USD'|'CDF';direction:'credit'|'debit'}>(functions,'adminAdjustUserWalletBalance');
 async function hashPin(value:string){const encoded=new TextEncoder().encode(value);const buffer=await crypto.subtle.digest('SHA-256',encoded);return Array.from(new Uint8Array(buffer)).map(b=>b.toString(16).padStart(2,'0')).join('')}
 
 async function userFallback(targetUid:string):Promise<AdminUserControlSnapshot>{
@@ -53,6 +54,7 @@ export const adminUserService={
   deleteAccount:async(targetUid:string)=>(await updateControl({targetUid,action:'delete_account'})).data,
   banAccount:async(targetUid:string,reason:string)=>(await updateControl({targetUid,action:'ban_account',reason})).data,
   setWalletStatus:async(targetUid:string,currency:'USD'|'CDF'|'ALL',status:WalletAdminStatus)=>{try{return(await updateControl({targetUid,action:'set_wallet_status',currency,status})).data}catch(error){console.error('[ADMIN_WALLET_CONTROL_REQUIRES_FUNCTION]',error);throw new Error('Le contrôle financier du wallet nécessite les Cloud Functions administratives.')}},
+  adjustWallet:async(targetUid:string,currency:'USD'|'CDF',direction:'credit'|'debit',amount:number,reason:string)=>(await adjustWallet({targetUid,currency,direction,amount,reason})).data,
   resetPin:async(targetUid:string)=>tryCallable(
     async()=>(await updateControl({targetUid,action:'reset_pin'})).data,
     async()=>{const temporaryPinHash=await hashPin('1234');await updateDoc(doc(db,'users',targetUid),{pinHash:'',temporaryPinHash,mustChangePin:true,pinChangedAt:0,useBiometrics:false,securityResetAt:Date.now(),updatedAt:Date.now()});return{ok:true}}
