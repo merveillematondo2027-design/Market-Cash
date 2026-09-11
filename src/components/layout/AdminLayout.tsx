@@ -1,14 +1,17 @@
 import{useState}from'react';
-import{Outlet,Link,useLocation}from'react-router-dom';
-import{Bell,Boxes,Building2,FileClock,HandCoins,LayoutDashboard,Library,Menu,ScrollText,Settings,Shield,ShieldCheck,Truck,User,Users,WalletCards,X}from'lucide-react';
+import{Outlet,Link,useLocation,useNavigate}from'react-router-dom';
+import{Bell,Boxes,Building2,FileClock,HandCoins,LayoutDashboard,Library,Menu,ScrollText,Settings,Shield,ShieldCheck,Truck,User,WalletCards,X}from'lucide-react';
 import{cn}from'../../lib/utils';
 import{useAuthStore}from'../../store/authStore';
+import AdminUserWalletAdjustDock from'../admin/AdminUserWalletAdjustDock';
 
 export default function AdminLayout(){
   const location=useLocation();
+  const navigate=useNavigate();
   const{user}=useAuthStore();
   const[showMenu,setShowMenu]=useState(false);
   const isOperations=user?.role==='agent_administratif';
+  const selectedUserUid=location.pathname.startsWith('/admin/users')?new URLSearchParams(location.search).get('uid')||'':'';
 
   const generalItems=[
     {name:'Vue d’ensemble',path:'/admin/dashboard',icon:LayoutDashboard,group:'Pilotage'},
@@ -51,5 +54,6 @@ export default function AdminLayout(){
     <nav className={`fixed inset-x-0 bottom-0 z-40 grid h-16 border-t border-slate-200 bg-white md:hidden ${primary.length===4?'grid-cols-5':'grid-cols-4'}`}>{primary.map(item=>{const I=item.icon;return <Link key={item.path} to={item.path} className={cn('flex flex-col items-center justify-center gap-1 px-1 text-center text-[9px] font-bold',active(item.path)?'text-blue-950':'text-slate-400')}><I size={20}/><span className="max-w-[72px] truncate">{item.name}</span></Link>})}<button onClick={()=>setShowMenu(true)} className="flex flex-col items-center justify-center gap-1 text-[10px] font-bold text-slate-400"><Menu size={20}/><span>Plus</span></button></nav>
 
     {showMenu&&<div className="fixed inset-0 z-[100] flex justify-end bg-slate-950/40" onClick={()=>setShowMenu(false)}><aside onClick={e=>e.stopPropagation()} className="h-full w-[88%] max-w-sm overflow-y-auto bg-white p-5 shadow-2xl"><div className="flex items-center justify-between border-b pb-4"><div><h2 className="text-lg font-black text-blue-950">Market-Cash Admin</h2><p className="text-xs text-slate-500">{sessionLabel}</p></div><button onClick={()=>setShowMenu(false)} className="rounded-xl p-2 hover:bg-slate-100"><X size={20}/></button></div><div className="mt-5">{navigation}</div></aside></div>}
+    {user?.role==='admin_general'&&selectedUserUid&&<AdminUserWalletAdjustDock targetUid={selectedUserUid} onClose={()=>navigate('/admin/users',{replace:true})}/>} 
   </div>;
 }
