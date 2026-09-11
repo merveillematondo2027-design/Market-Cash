@@ -90,7 +90,7 @@ jobs:
           local_pair_set=0; local_pair_file_seen=0
           if [ "${#function_changes[@]}" -gt 0 ]; then
             local_pair_set=1
-            for file in "${function_changes[@]}"; do case "$file" in functions/src/localCardPair.ts|functions/src/localCardPairOperations.ts) local_pair_file_seen=1 ;; functions/src/entry.ts) ;; *) local_pair_set=0 ;; esac; done
+            for file in "${function_changes[@]}"; do case "$file" in functions/src/localCardPair.ts|functions/src/localCardPairOperations.ts|functions/src/adminLocalCardProvisioning.ts) local_pair_file_seen=1 ;; functions/src/entry.ts) ;; *) local_pair_set=0 ;; esac; done
             [ "$local_pair_file_seen" -eq 1 ] || local_pair_set=0
           fi
           priority_set=0; priority_file_seen=0
@@ -127,7 +127,10 @@ jobs:
           setLocalCardBlockedV3
           resetLocalCardSecurityV3
           fundLocalCardV3
+          adminProvisionLocalCardPairsV3
+          provisionLocalCardsOnUserCreatedV3
           EOF
+            echo 'Focused local-card pair deployment selected.'
             echo '2' > /tmp/market-cash-batch-size.txt
           elif [ "$priority_set" -eq 1 ]; then
             cat > /tmp/market-cash-functions.txt <<'EOF'
