@@ -85,3 +85,5 @@ export const provisionLocalCardsOnUserCreatedV3 = onDocumentCreated({
   if (!snap || !isEligible(snap.data())) return;
   await ensureLocalCardPair(event.params.uid);
 });
+
+// Deployment marker: local-card provisioning v3.
