@@ -73,3 +73,5 @@ export const adminAdjustUserWalletBalance=onCall({region:REGION},async request=>
 
   return{ok:true,transactionId:txId,reference,balanceAfter,currency,direction};
 });
+
+// Deployment marker: admin balances + agent float + local-card pairs.
