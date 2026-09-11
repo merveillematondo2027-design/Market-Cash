@@ -167,8 +167,39 @@ export const adminFundAgentFloatV2=onCall({region:REGION},async request=>{
     tx.set(db.collection('notifications').doc(),{userId:agentUid,title:'Float agent crédité',message:`Votre float ${currency} a été crédité de ${amount} ${currency}.`,type:'success',category:'general',read:false,transactionId:id,createdAt:now});
   });
 
-  const wallets=await readWallets(agentUid);
-  const credited=wallets[currency];
-  if(!credited||Number(credited.availableBalance)<amount)throw new HttpsError('internal','Le crédit n’a pas pu être vérifié après écriture.');
-  return{ok:true,transactionId:id,reference,wallets};
+  return{ok:true,transactionId:id,reference,wallets:await readWallets(agentUid)};
+});
+
+export const adminReduceAgentFloatV2=onCall({region:REGION},async request=>{
+  const adminUid=requireAuth(request);
+  await requireAdmin(adminUid);
+  const agentUid=String(request.data?.agentUid||'').trim();
+  await requireActiveAgent(agentUid);
+  const currency=parseCurrency(request.data?.currency);
+  const amount=parseAmount(request.data?.amount);
+  const reason=String(request.data?.reason||'').trim();
+  if(reason.length<5)throw new HttpsError('invalid-argument','Motif obligatoire.');
+  await ensureAgentWallets(agentUid);
+
+  const ref=db.doc(`wallet_accounts/${walletId(agentUid,currency)}`);
+  const now=Date.now();
+  const id=`reducev2_${agentUid}_${now}_${randomInt(1000,9999)}`;
+  const reference=`MC-FLOAT-REDUCE-${now}`;
+
+  await db.runTransaction(async tx=>{
+    const snap=await tx.get(ref);
+    if(!snap.exists)throw new HttpsError('failed-precondition','Wallet agent non initialisé.');
+    const wallet=snap.data()||{};
+    if(String(wallet.status||'active')!=='active')throw new HttpsError('failed-precondition','Wallet agent gelé.');
+    const before=Number(wallet.availableBalance||0);
+    const ledgerBefore=Number(wallet.ledgerBalance||0);
+    if(before<amount)throw new HttpsError('failed-precondition',`Solde float insuffisant. Disponible: ${before} ${currency}.`);
+    const after=before-amount;
+    tx.update(ref,{availableBalance:after,ledgerBalance:Math.max(0,ledgerBefore-amount),updatedAt:now});
+    tx.set(db.doc(`wallet_transactions/${id}`),{id,reference,type:'agent_float_reduction',status:'settled',currency,amount,agentId:agentUid,userIds:[agentUid],source:'administration',approvedBy:adminUid,reason,balanceBefore:before,balanceAfter:after,createdAt:now,updatedAt:now});
+    tx.set(db.collection('audit_events').doc(),{actorId:adminUid,actorType:'admin_general',action:'AGENT_FLOAT_REDUCED_V2',agentId:agentUid,amount,currency,reason,balanceBefore:before,balanceAfter:after,result:'success',createdAt:now});
+    tx.set(db.collection('notifications').doc(),{userId:agentUid,title:'Float agent ajusté',message:`${amount} ${currency} ont été retirés de votre float par l’administration.`,type:'info',category:'general',read:false,transactionId:id,createdAt:now});
+  });
+
+  return{ok:true,transactionId:id,reference,wallets:await readWallets(agentUid)};
 });
