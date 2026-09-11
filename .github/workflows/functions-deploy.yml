@@ -19,26 +19,21 @@ jobs:
     permissions:
       contents: read
       id-token: write
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 2
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-
       - name: Install Functions dependencies
         working-directory: functions
         run: npm install --no-audit --no-fund
-
       - name: Build Functions
         working-directory: functions
         run: npm run build
-
       - name: Reduce Gen2 CPU for quota-limited deployment
         shell: bash
         run: |
@@ -56,26 +51,19 @@ jobs:
           if changed == 0:
               raise SystemExit('No Firebase Gen2 region options were patched; refusing deployment.')
           PY
-
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: 'projects/153173040202/locations/global/workloadIdentityPools/github-actions/providers/market-cash'
           service_account: 'market-cash-github-deployer@automarket-fintech.iam.gserviceaccount.com'
-
       - name: Install Firebase CLI
         run: npm install -g firebase-tools
-
       - name: Select Functions to deploy
         shell: bash
         run: |
           set -euo pipefail
           mapfile -t function_changes < <(git diff --name-only HEAD^ HEAD -- functions/src || true)
-          echo 'Changed function sources:'
-          printf '%s\n' "${function_changes[@]:-}"
-
-          treasury_set=0
-          treasury_file_seen=0
+          treasury_set=0; treasury_file_seen=0
           if [ "${#function_changes[@]}" -gt 0 ]; then
             treasury_set=1
             for file in "${function_changes[@]}"; do
@@ -87,66 +75,35 @@ jobs:
             done
             [ "$treasury_file_seen" -eq 1 ] || treasury_set=0
           fi
-
-          payment_control_set=0
-          payment_file_seen=0
+          payment_control_set=0; payment_file_seen=0
           if [ "${#function_changes[@]}" -gt 0 ]; then
             payment_control_set=1
-            for file in "${function_changes[@]}"; do
-              case "$file" in
-                functions/src/paymentControl.ts) payment_file_seen=1 ;;
-                functions/src/entry.ts) ;;
-                *) payment_control_set=0 ;;
-              esac
-            done
+            for file in "${function_changes[@]}"; do case "$file" in functions/src/paymentControl.ts) payment_file_seen=1 ;; functions/src/entry.ts) ;; *) payment_control_set=0 ;; esac; done
             [ "$payment_file_seen" -eq 1 ] || payment_control_set=0
           fi
-
-          bridge_set=0
-          bridge_file_seen=0
+          bridge_set=0; bridge_file_seen=0
           if [ "${#function_changes[@]}" -gt 0 ]; then
             bridge_set=1
-            for file in "${function_changes[@]}"; do
-              case "$file" in
-                functions/src/apiKeyCardPayment.ts) bridge_file_seen=1 ;;
-                functions/src/entry.ts) ;;
-                *) bridge_set=0 ;;
-              esac
-            done
+            for file in "${function_changes[@]}"; do case "$file" in functions/src/apiKeyCardPayment.ts) bridge_file_seen=1 ;; functions/src/entry.ts) ;; *) bridge_set=0 ;; esac; done
             [ "$bridge_file_seen" -eq 1 ] || bridge_set=0
           fi
-
-          local_pair_set=0
-          local_pair_file_seen=0
+          local_pair_set=0; local_pair_file_seen=0
           if [ "${#function_changes[@]}" -gt 0 ]; then
             local_pair_set=1
-            for file in "${function_changes[@]}"; do
-              case "$file" in
-                functions/src/localCardPair.ts|functions/src/localCardPairOperations.ts) local_pair_file_seen=1 ;;
-                functions/src/entry.ts) ;;
-                *) local_pair_set=0 ;;
-              esac
-            done
+            for file in "${function_changes[@]}"; do case "$file" in functions/src/localCardPair.ts|functions/src/localCardPairOperations.ts) local_pair_file_seen=1 ;; functions/src/entry.ts) ;; *) local_pair_set=0 ;; esac; done
             [ "$local_pair_file_seen" -eq 1 ] || local_pair_set=0
           fi
-
-          priority_set=0
-          priority_file_seen=0
+          priority_set=0; priority_file_seen=0
           if [ "${#function_changes[@]}" -gt 0 ]; then
             priority_set=1
-            for file in "${function_changes[@]}"; do
-              case "$file" in
-                functions/src/cardProvisioningV2.ts|functions/src/security.ts) priority_file_seen=1 ;;
-                functions/src/entry.ts) ;;
-                *) priority_set=0 ;;
-              esac
-            done
+            for file in "${function_changes[@]}"; do case "$file" in functions/src/cardProvisioningV2.ts|functions/src/security.ts) priority_file_seen=1 ;; functions/src/entry.ts) ;; *) priority_set=0 ;; esac; done
             [ "$priority_file_seen" -eq 1 ] || priority_set=0
           fi
-
           if [ "$treasury_set" -eq 1 ]; then
             cat > /tmp/market-cash-functions.txt <<'EOF'
           getAdminTreasurySnapshot
+          revealAdminTreasuryCvv
+          resetAdminTreasuryCvv
           adjustAdminTreasury
           EOF
             echo 'Focused admin treasury deployment selected.'
@@ -161,11 +118,7 @@ jobs:
             echo 'Focused Payment Control deployment selected.'
             echo '2' > /tmp/market-cash-batch-size.txt
           elif [ "$bridge_set" -eq 1 ]; then
-            cat > /tmp/market-cash-functions.txt <<'EOF'
-          marketCashApiCardPaymentByKey
-          EOF
-            echo 'Fast Market-Cash API-key payment bridge deployment selected.'
-            echo '1' > /tmp/market-cash-batch-size.txt
+            echo marketCashApiCardPaymentByKey > /tmp/market-cash-functions.txt; echo '1' > /tmp/market-cash-batch-size.txt
           elif [ "$local_pair_set" -eq 1 ]; then
             cat > /tmp/market-cash-functions.txt <<'EOF'
           ensureLocalCardPairV3
@@ -175,7 +128,6 @@ jobs:
           resetLocalCardSecurityV3
           fundLocalCardV3
           EOF
-            echo 'Fast Market-Cash local-card pair deployment selected.'
             echo '2' > /tmp/market-cash-batch-size.txt
           elif [ "$priority_set" -eq 1 ]; then
             cat > /tmp/market-cash-functions.txt <<'EOF'
@@ -192,24 +144,19 @@ jobs:
           merchantPaymentFromLocalCardWithCvv
           agentLocalCardCashOutWithCvv
           EOF
-            echo 'Priority callable security/KYC and secure transaction deployment selected.'
             echo '1' > /tmp/market-cash-batch-size.txt
           else
             node <<'NODE' > /tmp/market-cash-functions.txt
           const mod = require('./functions/lib/entry.js');
           const blockedUntilIamReady = new Set(['onKycRequestApproved', 'onClientKycApproved']);
-          for (const [name, value] of Object.entries(mod)) {
-            if (typeof value === 'function' && value.__endpoint && !blockedUntilIamReady.has(name)) console.log(name);
-          }
+          for (const [name, value] of Object.entries(mod)) if (typeof value === 'function' && value.__endpoint && !blockedUntilIamReady.has(name)) console.log(name);
           NODE
             sort -u /tmp/market-cash-functions.txt -o /tmp/market-cash-functions.txt
-            echo 'General Functions change detected: deployable export set selected.'
             echo '2' > /tmp/market-cash-batch-size.txt
           fi
           echo 'Functions selected:'
           cat /tmp/market-cash-functions.txt
           test -s /tmp/market-cash-functions.txt
-
       - name: Deploy Cloud Functions conservatively with retry
         shell: bash
         run: |
@@ -227,8 +174,8 @@ jobs:
             for attempt in 1 2 3; do
               echo "Deploying: ${batch[*]} (attempt ${attempt}/3)"
               if firebase deploy --only "$only" --project automarket-fintech --non-interactive; then success=1; break; fi
-              wait_seconds=$((attempt * 35)); echo "Deployment failure; retrying in ${wait_seconds}s..."; sleep "$wait_seconds"
+              sleep $((attempt * 35))
             done
-            if [ "$success" -ne 1 ]; then echo "Deployment failed after 3 attempts: ${batch[*]}"; exit 1; fi
+            [ "$success" -eq 1 ] || exit 1
             sleep 12
           done
