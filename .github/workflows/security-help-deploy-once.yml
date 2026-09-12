@@ -1,0 +1,55 @@
+name: Security and help deployment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/security-help-deploy-once.yml'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  patch-build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Apply security and help migration
+        run: python3 scripts/security_help_migration.py
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Commit security and help changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/App.tsx src/pages/client/Settings.tsx
+          git commit -m "Refine first-login security, PIN flow and global help" || true
+          git push origin main
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/153173040202/locations/global/workloadIdentityPools/github-actions/providers/market-cash'
+          service_account: 'market-cash-github-deployer@automarket-fintech.iam.gserviceaccount.com'
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Deploy frontend Hosting
+        run: firebase deploy --only hosting --project automarket-fintech --non-interactive
