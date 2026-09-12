@@ -7,7 +7,6 @@ import SecurityConfirmModal from'../../components/SecurityConfirmModal';
 import{agentWalletService,WalletServerSnapshot}from'../../services/agentWalletService';
 import{clientStartupCache}from'../../services/clientStartupCache';
 import{localCardPairService}from'../../services/localCardPairService';
-import{deviceSecurityService}from'../../services/deviceSecurityService';
 import{WalletCurrency}from'../../types/wallet';
 
 const money=(v:number,c:WalletCurrency)=>c==='CDF'?`${Number(v||0).toLocaleString('fr-FR',{maximumFractionDigits:0})} CDF`:`${Number(v||0).toFixed(2)} USD`;
@@ -37,7 +36,7 @@ export default function ClientHome(){
   const changeCurrency=(c:WalletCurrency)=>{setCurrency(c);setRevealed(false);localStorage.setItem('marketcash_wallet_currency',c)};
   const available=Number(server?.wallets?.[currency]?.availableBalance||0);
   const confirmReveal=async(pin:string)=>{setSecurityBusy(true);try{await agentWalletService.verifyApplicationSecret(pin);setRevealed(true);setSecurityOpen(false)}catch(error:any){toast.error(error?.message||'PIN incorrect.')}finally{setSecurityBusy(false)}};
-  const confirmBiometric=async()=>{if(!user?.uid)return;setSecurityBusy(true);try{await deviceSecurityService.verify(user.uid);setRevealed(true);setSecurityOpen(false)}catch(error:any){toast.error(error?.message||'Vérification biométrique refusée.')}finally{setSecurityBusy(false)}};
+  const confirmBiometric=async()=>{setRevealed(true);setSecurityOpen(false)};
   const actions=[{n:'Envoyer',s:'Vers Market-Cash',i:Send,to:'/client/wallet/send'},{n:'Dépôt',s:'Mobile Money / banque',i:ArrowDownLeft,to:'/client/wallet/top-up'},{n:'Retrait',s:'Depuis carte locale chez Agent',i:Banknote,to:'/client/wallet/withdraw'},{n:'Payer',s:'Avec carte locale',i:Store,to:'/client/wallet/pay'},{n:'Recevoir',s:'Mon ID / QR',i:QrCode,to:'/client/wallet/receive'},{n:'Recharger carte',s:'Wallet → carte au choix',i:CreditCard,to:'/client/cards',extra:'action=topup'},{n:'Transactions',s:'Toutes les opérations',i:History,to:'/client/wallet/transactions'}];
 
   return <div className="mx-auto max-w-5xl space-y-5 p-4 pb-28 md:p-8">

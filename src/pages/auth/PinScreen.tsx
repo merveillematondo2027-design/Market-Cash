@@ -1,4 +1,4 @@
-import React,{useEffect,useState}from'react';
+import React,{useEffect,useRef,useState}from'react';
 import{useNavigate}from'react-router-dom';
 import{deleteField,doc,updateDoc}from'firebase/firestore';
 import{Fingerprint,KeyRound,ShieldCheck}from'lucide-react';
@@ -17,16 +17,17 @@ const validPin=(value:string)=>/^\d{4,10}$/.test(value);
 export default function PinScreen(){
   const navigate=useNavigate();
   const{user,setUser,setPinVerified}=useAuthStore();
-  const[pin,setPin]=useState('');const[confirmPin,setConfirmPin]=useState('');const[mode,setMode]=useState<Mode>('verify');const[loading,setLoading]=useState(false);const[showLogoutModal,setShowLogoutModal]=useState(false);const[biometricReady,setBiometricReady]=useState(false);
+  const[pin,setPin]=useState('');const[confirmPin,setConfirmPin]=useState('');const[mode,setMode]=useState<Mode>('verify');const[loading,setLoading]=useState(false);const[showLogoutModal,setShowLogoutModal]=useState(false);const[biometricReady,setBiometricReady]=useState(false);const autoBioAttempted=useRef(false);
   const forcedChange=Boolean(user?.mustChangePin);
   const clientSetup=Boolean(user?.role==='client'&&!user?.pinHash&&!forcedChange);
 
   useEffect(()=>{if(!user){navigate('/login');return;}if(forcedChange){setMode('temporary');return;}if(user.role==='client'){setMode(clientSetup?'setup':'verify');return;}navigate(getHomeRouteByRole(user.role),{replace:true});},[user,forcedChange,clientSetup,navigate]);
-  useEffect(()=>{if(!user?.uid||!user.useBiometrics){setBiometricReady(false);return}void deviceSecurityService.platformAvailable().then(ok=>setBiometricReady(ok&&deviceSecurityService.enrolled(user.uid)))},[user?.uid,user?.useBiometrics]);
+  useEffect(()=>{if(!user?.uid||!user.useBiometrics){setBiometricReady(false);return}void deviceSecurityService.platformAvailable().then(setBiometricReady)},[user?.uid,user?.useBiometrics]);
 
   const clean=(value:string)=>value.replace(/\D/g,'').slice(0,PIN_MAX);
   const goHome=()=>{if(!user)return;setPinVerified(true);sessionStorage.setItem('marketcash_security_verified_at',String(Date.now()));navigate(getHomeRouteByRole(user.role),{replace:true})};
   const biometricUnlock=async()=>{if(!user)return;setLoading(true);try{await deviceSecurityService.verify(user.uid);goHome();toast.success('Biométrie confirmée.')}catch(error:any){toast.error(error?.message||'Vérification biométrique impossible.')}finally{setLoading(false)}};
+  useEffect(()=>{if(mode!=='verify'||!biometricReady||!user?.uid||autoBioAttempted.current)return;autoBioAttempted.current=true;const timer=setTimeout(()=>void biometricUnlock(),120);return()=>clearTimeout(timer)},[mode,biometricReady,user?.uid]);
   const completeSetup=async()=>{if(!user)return;if(!validPin(pin)||!validPin(confirmPin))return toast.error(`Le PIN doit contenir entre ${PIN_MIN} et ${PIN_MAX} chiffres.`);if(pin!==confirmPin)return toast.error('Les deux codes PIN ne correspondent pas.');if(forcedChange&&pin==='1234')return toast.error('Choisissez un code différent du code temporaire.');setLoading(true);try{const pinHash=await hashPin(pin);const now=Date.now();await updateDoc(doc(db,'users',user.uid),{pinHash,temporaryPinHash:deleteField(),mustChangePin:false,pinChangedAt:now,updatedAt:now});setUser({...user,pinHash,temporaryPinHash:undefined,mustChangePin:false,pinChangedAt:now,updatedAt:now});goHome();toast.success(forcedChange?'Nouveau PIN enregistré.':'PIN créé.');}catch(error:any){console.error('[PIN_SAVE_ERROR]',error);toast.error(error?.code==='permission-denied'?'Permission refusée pendant l’enregistrement du PIN.':'Impossible d’enregistrer le PIN.');}finally{setLoading(false)}};
   const verifyTemporary=async(e:React.FormEvent)=>{e.preventDefault();if(!user||!validPin(pin))return void toast.error(`Entrez un PIN de ${PIN_MIN} à ${PIN_MAX} chiffres.`);setLoading(true);try{const entered=await hashPin(pin);const expected=user.temporaryPinHash||user.pinHash;if(!expected||entered!==expected){toast.error('Code temporaire incorrect.');setPin('');return;}setPin('');setConfirmPin('');setMode('setup');}finally{setLoading(false)}};
   const verifyExisting=async(e:React.FormEvent)=>{e.preventDefault();if(!user||!validPin(pin))return void toast.error(`Entrez un PIN de ${PIN_MIN} à ${PIN_MAX} chiffres.`);setLoading(true);try{const entered=await hashPin(pin);if(user.pinHash===entered)goHome();else{toast.error('PIN incorrect.');setPin('')}}finally{setLoading(false)}};

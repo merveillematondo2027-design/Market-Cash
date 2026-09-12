@@ -43,8 +43,8 @@ function parseAmount(value: unknown) {
 const DEFAULT_FEES = {
   merchant_payment: { percent: 2.0, minUsd: 0.10, minCdf: 250, chargedTo: 'payer' },
   market_cash_transfer: { percent: 1.5, minUsd: 0.05, minCdf: 150, chargedTo: 'sender' },
-  wallet_to_card: { percent: 0.5, minUsd: 0.02, minCdf: 50, chargedTo: 'wallet' },
-  agent_cash_in: { percent: 1.0, minUsd: 0.05, minCdf: 100, chargedTo: 'client' },
+  wallet_to_card: { percent: 0, minUsd: 0, minCdf: 0, chargedTo: 'none' },
+  agent_cash_in: { percent: 1.0, minUsd: 0.05, minCdf: 100, chargedTo: 'platform_commission' },
   agent_cash_out: { percent: 3.5, minUsd: 0.15, minCdf: 350, chargedTo: 'client' },
   mobile_money_withdrawal: { percent: 4.0, minUsd: 0.20, minCdf: 500, chargedTo: 'client' },
   bank_withdrawal: { percent: 3.0, minUsd: 0.20, minCdf: 500, chargedTo: 'client' },

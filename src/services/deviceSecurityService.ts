@@ -7,7 +7,7 @@ const finishRegistration=httpsCallable(functions,'finishPasskeyRegistration');
 const beginAuthentication=httpsCallable(functions,'beginPasskeyAuthentication');
 const finishAuthentication=httpsCallable(functions,'finishPasskeyAuthentication');
 const removePasskeys=httpsCallable(functions,'removeMyPasskeys');
-const updatePreferences=httpsCallable(functions,'getClientSecurityOverview');
+const updatePreferences=httpsCallable(functions,'updateSecurityPreferences');
 
 export const deviceSecurityService={
  supported(){return typeof window!=='undefined'&&window.isSecureContext&&'PublicKeyCredential'in window&&!!navigator.credentials},

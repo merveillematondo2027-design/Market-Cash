@@ -25,7 +25,7 @@ export async function transactionFee(action:FeeAction,currency:FeeCurrency,amoun
   const percent=Number.isFinite(Number(override.percent))?Number(override.percent):base.percent;
   const minUsd=Number.isFinite(Number(override.minUsd))?Number(override.minUsd):base.minUsd;
   const minCdf=Number.isFinite(Number(override.minCdf))?Number(override.minCdf):base.minCdf;
-  if(action==='wallet_to_card') return 0;
+  if(action==='wallet_to_card'||override.enabled===false) return 0;
   const minimum=currency==='USD'?minUsd:minCdf;
   return roundMoney(Math.max(amount*percent/100,minimum));
 }
