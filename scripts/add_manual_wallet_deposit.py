@@ -14,3 +14,4 @@ if old2 not in s: raise SystemExit('bank button not found')
 s=s.replace(old2,new2,1)
 s=s.replace("import{ArrowDownLeft,ArrowLeft,Building2,ChevronRight,CreditCard,Eye,EyeOff,History,QrCode,Send,Smartphone,WalletCards}from'lucide-react';","import{ArrowDownLeft,ArrowLeft,Building2,ChevronRight,CreditCard,Eye,EyeOff,History,QrCode,Send,Smartphone,UploadCloud,WalletCards}from'lucide-react';")
 p.write_text(s)
+# deployment trigger v1
