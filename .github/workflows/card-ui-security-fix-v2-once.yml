@@ -1,0 +1,53 @@
+name: Card UI security fix v2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/card-ui-security-fix-v2-once.yml'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Reuse existing security callable
+        run: python3 scripts/reuse_security_overview_for_preferences.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install frontend
+        run: npm install
+      - name: Build frontend
+        run: npm run build
+      - name: Install functions
+        working-directory: functions
+        run: npm install
+      - name: Build functions
+        working-directory: functions
+        run: npm run build
+      - name: Commit v2 fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add functions/src/security.ts src/services/deviceSecurityService.ts
+          git commit -m "Fix auto-lock duration through existing security callable" || true
+          git push origin main
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/153173040202/locations/global/workloadIdentityPools/github-actions/providers/market-cash'
+          service_account: 'market-cash-github-deployer@automarket-fintech.iam.gserviceaccount.com'
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+      - name: Deploy existing security callable
+        run: firebase deploy --only functions:getClientSecurityOverview --project automarket-fintech --non-interactive
+      - name: Deploy Hosting
+        run: firebase deploy --only hosting --project automarket-fintech --non-interactive
