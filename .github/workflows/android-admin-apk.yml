@@ -1,0 +1,66 @@
+name: Market-Cash Android Admin APK
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'native/android-sms/**'
+      - 'scripts/prepare-android-payment-sms.mjs'
+      - 'capacitor.config.ts'
+      - 'package.json'
+      - '.github/workflows/android-admin-apk.yml'
+  workflow_dispatch:
+
+jobs:
+  build-android-admin:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install dependencies
+        run: npm install --no-package-lock --no-audit --no-fund
+
+      - name: TypeScript
+        run: npm run lint
+
+      - name: Build web application
+        run: npm run build
+
+      - name: Generate Capacitor Android project
+        run: npx cap add android
+
+      - name: Apply Market-Cash payment SMS native layer
+        run: node scripts/prepare-android-payment-sms.mjs
+
+      - name: Sync Capacitor assets
+        run: npx cap sync android
+
+      - name: Build internal debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Upload internal APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-cash-admin-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7

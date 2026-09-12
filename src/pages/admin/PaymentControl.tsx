@@ -3,6 +3,7 @@ import { collection, limit, onSnapshot, orderBy, query } from 'firebase/firestor
 import { httpsCallable } from 'firebase/functions';
 import { AlertTriangle, CheckCircle2, CircleDollarSign, Clock3, CopyCheck, Database, MessageSquareText, RefreshCw, Search, ShieldCheck, Smartphone, XCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
+import PaymentSmsBridgePanel from '../../components/admin/PaymentSmsBridgePanel';
 import { db, functions } from '../../firebase/config';
 
 interface PaymentSmsEvent {
@@ -181,6 +182,8 @@ export default function PaymentControl() {
     <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {cards.map(card => { const Icon = card.icon; return <button key={card.label} onClick={() => setTab(card.tab)} className={`rounded-2xl border bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${tab === card.tab ? 'border-blue-950 ring-1 ring-blue-950' : 'border-slate-200'}`}><div className="flex items-start justify-between"><div><div className="text-xs font-bold text-slate-500">{card.label}</div><div className="mt-1 text-3xl font-black text-slate-950">{card.value}</div></div><div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-50 text-blue-950"><Icon size={20}/></div></div><div className="mt-3 text-[11px] text-slate-400">{card.note} · cliquer pour afficher</div></button> })}
     </section>
+
+    <PaymentSmsBridgePanel />
 
     <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
       <button onClick={() => setInfoPanel(infoPanel === 'proof' ? null : 'proof')} className="flex w-full items-center gap-2 text-left"><Search size={19} className="text-blue-950"/><div><h2 className="font-black text-slate-950">Vérifier une preuve client</h2><p className="text-xs text-slate-500">Market-Cash cherche une transaction réellement reçue avant toute validation.</p></div></button>
