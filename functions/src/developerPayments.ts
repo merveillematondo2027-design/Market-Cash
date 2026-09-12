@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { HttpsError, onCall, onRequest } from 'firebase-functions/v2/https';
+import { LOCAL_CARD_PREFIX, localCardId, type LocalCardCurrency } from './localCardPair';
 
 if (!getApps().length) initializeApp();
 const db = getFirestore();
@@ -13,7 +14,6 @@ const sha256 = (value: string) => createHash('sha256').update(value).digest('hex
 const normalize = (value: unknown) => String(value || '').trim();
 const normalizeUpper = (value: unknown) => normalize(value).toUpperCase();
 const roundMoney = (value: number) => Math.round(value * 100) / 100;
-const localCardIdForUid = (uid: string) => `local_${sha256(`local-card:${uid}`).slice(0, 24)}`;
 const cardAccountId = (cardId: string, currency: Currency) => `card_${currency.toLowerCase()}_${cardId}`;
 const developerAccountId = (uid: string) => `DEV-${sha256(`developer:${uid}`).slice(0, 10).toUpperCase()}`;
 const developerWalletId = (developerId: string, currency: Currency) => `dev_${currency.toLowerCase()}_${developerId}`;
@@ -146,9 +146,9 @@ export const marketCashApiCardPayment = onRequest({ region: REGION }, async (req
   try{
     const auth=await authenticateDeveloperApp(req),currency=parseCurrency(req.body?.currency),amount=parseAmount(req.body?.amount),cardNumber=normalize(req.body?.cardNumber).replace(/\D/g,''),holder=normalizeUpper(req.body?.cardHolder),expiry=normalize(req.body?.expiry),cvv=normalize(req.body?.cvv),externalReference=normalize(req.body?.externalReference),reason=normalize(req.body?.reason||`Paiement ${auth.app.appName}`);
     const allowedCurrencies=Array.isArray(auth.app.allowedCurrencies)?auth.app.allowedCurrencies:CURRENCIES;if(!allowedCurrencies.includes(currency))throw new Error('CURRENCY_NOT_ALLOWED');
-    if(!/^4585020002\d{6}$/.test(cardNumber))throw new Error('CARD_INVALID'); if(!/^\d{3}$/.test(cvv))throw new Error('CVV_INVALID'); if(!/^\d{2}\/\d{2}$/.test(expiry))throw new Error('EXPIRY_INVALID'); if(externalReference.length<6||externalReference.length>120)throw new Error('REFERENCE_INVALID');
+    if(!new RegExp(`^${LOCAL_CARD_PREFIX}\\d{6}$`).test(cardNumber))throw new Error('CARD_INVALID'); if(!/^\d{3}$/.test(cvv))throw new Error('CVV_INVALID'); if(!/^\d{2}\/\d{2}$/.test(expiry))throw new Error('EXPIRY_INVALID'); if(externalReference.length<6||externalReference.length>120)throw new Error('REFERENCE_INVALID');
     const registry=await db.doc(`card_number_registry/${cardNumber}`).get();if(!registry.exists)throw new Error('CARD_NOT_FOUND');
-    const clientUid=String(registry.data()?.userId||''),cardId=localCardIdForUid(clientUid),txId=`devpay_${sha256(`${auth.appId}:${externalReference}`).slice(0,36)}`,cardRef=db.doc(`local_cards/${cardId}`),cardWalletRef=db.doc(`card_wallet_accounts/${cardAccountId(cardId,currency)}`),developerWalletRef=db.doc(`developer_wallet_accounts/${developerWalletId(auth.developerId,currency)}`),billingRef=db.doc(`developer_billing_accounts/${billingAccountId(auth.developerId)}`),apiRevenueRef=db.doc(`platform_revenue_accounts/${apiRevenueId(currency)}`),txRef=db.doc(`wallet_transactions/${txId}`),securityRef=db.doc(`user_security/${clientUid}`);
+    const clientUid=String(registry.data()?.userId||'').trim(),registryCurrency=String(registry.data()?.currency||'').toUpperCase() as LocalCardCurrency;if(!clientUid)throw new Error('CARD_NOT_FOUND');if(registryCurrency!=='USD'&&registryCurrency!=='CDF')throw new Error('CARD_NOT_FOUND');if(registryCurrency!==currency)throw new Error('CURRENCY_NOT_ALLOWED');const cardId=localCardId(clientUid,registryCurrency),txId=`devpay_${sha256(`${auth.appId}:${externalReference}`).slice(0,36)}`,cardRef=db.doc(`local_cards/${cardId}`),cardWalletRef=db.doc(`card_wallet_accounts/${cardAccountId(cardId,registryCurrency)}`),developerWalletRef=db.doc(`developer_wallet_accounts/${developerWalletId(auth.developerId,currency)}`),billingRef=db.doc(`developer_billing_accounts/${billingAccountId(auth.developerId)}`),apiRevenueRef=db.doc(`platform_revenue_accounts/${apiRevenueId(currency)}`),txRef=db.doc(`wallet_transactions/${txId}`),securityRef=db.doc(`user_security/${clientUid}`);
     const partner=auth.developer.businessType==='api_provider',pricing=await developerApiPricing();
     const result=await db.runTransaction(async tx=>{
       const refs=[tx.get(txRef),tx.get(cardRef),tx.get(cardWalletRef),tx.get(developerWalletRef),tx.get(apiRevenueRef),tx.get(securityRef)];
