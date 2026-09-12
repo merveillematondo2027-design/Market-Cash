@@ -1,11 +1,5 @@
 import{Link,useLocation}from'react-router-dom';
-import{HelpCircle}from'lucide-react';
+import{Bot,HelpCircle,MessageCircle}from'lucide-react';
 import{useAuthStore}from'../store/authStore';
-
-export default function GlobalHelpButton(){
- const{isAuthenticated,user}=useAuthStore();
- const location=useLocation();
- if(!isAuthenticated||!user)return null;
- if(location.pathname==='/help')return null;
- return <Link to="/help" aria-label="Aide Market-Cash" title="Aide & assistance" className="fixed right-20 top-3 z-[80] inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white/95 px-3 text-xs font-black text-blue-950 shadow-sm backdrop-blur transition hover:bg-blue-50"><HelpCircle size={18}/><span className="hidden sm:inline">Aide</span></Link>;
-}
+import{openWhatsAppSupport}from'../lib/whatsappSupport';
+export default function GlobalHelpButton(){const{isAuthenticated,user}=useAuthStore();const location=useLocation();if(!isAuthenticated||!user)return null;const inAssistant=location.pathname==='/assistant';return <div className="fixed right-4 top-3 z-[80] flex items-center gap-2">{location.pathname!=='/help'&&!inAssistant&&<Link to="/help" aria-label="Aide Market-Cash" title="Aide & assistance" className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white/95 px-3 text-xs font-black text-blue-950 shadow-sm backdrop-blur transition hover:bg-blue-50"><HelpCircle size={18}/><span className="hidden md:inline">Aide</span></Link>}{inAssistant?<button onClick={()=>openWhatsAppSupport('ASSISTANT_GLOBAL_BUTTON')} className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-3 text-xs font-black text-white shadow-sm"><MessageCircle size={18}/><span>Discuter sur WhatsApp</span></button>:<Link to="/assistant" className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-950 px-3 text-xs font-black text-white shadow-sm"><Bot size={18}/><span className="hidden sm:inline">Discuter avec un assistant</span><span className="sm:hidden">Assistant</span></Link>}</div>}
