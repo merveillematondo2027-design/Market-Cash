@@ -1,0 +1,38 @@
+name: Deploy Mungwele IA Cloud Run Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/deploy-mungwele-cloudrun-once.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout MUNGWELE IA
+        uses: actions/checkout@v4
+        with:
+          repository: merveillematondo2027-design/MUNGWELE-IA-STUDIO
+          ref: main
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/153173040202/locations/global/workloadIdentityPools/github-actions/providers/market-cash'
+          service_account: 'market-cash-github-deployer@automarket-fintech.iam.gserviceaccount.com'
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy backend source to Cloud Run
+        run: |
+          gcloud run deploy mungwele-ia-studio-git \
+            --source . \
+            --region europe-west1 \
+            --project diablo-design-ai \
+            --quiet
