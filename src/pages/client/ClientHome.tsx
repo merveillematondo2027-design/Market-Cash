@@ -7,6 +7,7 @@ import SecurityConfirmModal from'../../components/SecurityConfirmModal';
 import{agentWalletService,WalletServerSnapshot}from'../../services/agentWalletService';
 import{clientStartupCache}from'../../services/clientStartupCache';
 import{localCardPairService}from'../../services/localCardPairService';
+import{deviceSecurityService}from'../../services/deviceSecurityService';
 import{WalletCurrency}from'../../types/wallet';
 
 const money=(v:number,c:WalletCurrency)=>c==='CDF'?`${Number(v||0).toLocaleString('fr-FR',{maximumFractionDigits:0})} CDF`:`${Number(v||0).toFixed(2)} USD`;
@@ -36,6 +37,7 @@ export default function ClientHome(){
   const changeCurrency=(c:WalletCurrency)=>{setCurrency(c);setRevealed(false);localStorage.setItem('marketcash_wallet_currency',c)};
   const available=Number(server?.wallets?.[currency]?.availableBalance||0);
   const confirmReveal=async(pin:string)=>{setSecurityBusy(true);try{await agentWalletService.verifyApplicationSecret(pin);setRevealed(true);setSecurityOpen(false)}catch(error:any){toast.error(error?.message||'PIN incorrect.')}finally{setSecurityBusy(false)}};
+  const confirmBiometric=async()=>{if(!user?.uid)return;setSecurityBusy(true);try{await deviceSecurityService.verify(user.uid);setRevealed(true);setSecurityOpen(false)}catch(error:any){toast.error(error?.message||'Vérification biométrique refusée.')}finally{setSecurityBusy(false)}};
   const actions=[{n:'Envoyer',s:'Vers Market-Cash',i:Send,to:'/client/wallet/send'},{n:'Dépôt',s:'Mobile Money / banque',i:ArrowDownLeft,to:'/client/wallet/top-up'},{n:'Retrait',s:'Depuis carte locale chez Agent',i:Banknote,to:'/client/wallet/withdraw'},{n:'Payer',s:'Avec carte locale',i:Store,to:'/client/wallet/pay'},{n:'Recevoir',s:'Mon ID / QR',i:QrCode,to:'/client/wallet/receive'},{n:'Recharger carte',s:'Wallet → carte au choix',i:CreditCard,to:'/client/cards',extra:'action=topup'},{n:'Transactions',s:'Toutes les opérations',i:History,to:'/client/wallet/transactions'}];
 
   return <div className="mx-auto max-w-5xl space-y-5 p-4 pb-28 md:p-8">
@@ -44,6 +46,6 @@ export default function ClientHome(){
     <section className="grid grid-cols-2 gap-3 md:grid-cols-4">{actions.map(x=><Link key={x.n} to={`${x.to}?${x.extra?`${x.extra}&`:''}currency=${currency}`} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition active:scale-[.98]"><x.i className="text-blue-800" size={22}/><span className="mt-3 block text-sm font-black text-slate-800">{x.n}</span><span className="mt-1 block text-[11px] leading-4 text-slate-500">{x.s}</span></Link>)}</section>
     <section className="grid gap-3 md:grid-cols-2"><Link to={`/client/wallet?currency=${currency}`} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><WalletCards className="text-blue-800"/><h2 className="mt-3 font-black text-slate-950">Portefeuille principal {currency}</h2><p className="mt-1 text-sm text-slate-500">Il reçoit les dépôts et alimente les cartes Market-Cash.</p></Link><Link to="/client/cards" className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><CreditCard className="text-blue-800"/><h2 className="mt-3 font-black text-slate-950">Mes cartes</h2><p className="mt-1 text-sm text-slate-500">Market-Cash Locale, Visa Standard et Visa Gold sont séparées en trois rubriques.</p></Link></section>
     <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-start gap-3"><div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-slate-100"><ArrowUpRight className="text-slate-700"/></div><div><h2 className="font-black text-slate-950">Flux des fonds</h2><p className="text-sm text-slate-500">Dépôt externe → portefeuille principal → carte choisie. Le Wallet reste la source d’alimentation des cartes.</p></div></div></section>
-    <SecurityConfirmModal open={securityOpen} busy={securityBusy} onClose={()=>!securityBusy&&setSecurityOpen(false)} onConfirm={confirmReveal} title="Afficher mon solde" subtitle="Entrez le PIN de l’application pour afficher le solde. Votre ID Wallet reste toujours visible."/>
+    <SecurityConfirmModal open={securityOpen} busy={securityBusy} onClose={()=>!securityBusy&&setSecurityOpen(false)} onConfirm={confirmReveal} onBiometric={confirmBiometric} title="Afficher mon solde" subtitle="Entrez le PIN de l’application pour afficher le solde. Votre ID Wallet reste toujours visible."/>
   </div>;
 }
