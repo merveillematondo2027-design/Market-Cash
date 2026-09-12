@@ -1,0 +1,49 @@
+name: Unify direct API fee
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/unify-direct-api-fee-once.yml'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Apply fee unification
+        run: python3 scripts/unify_direct_api_fee.py
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Functions dependencies
+        working-directory: functions
+        run: npm install --no-package-lock --no-audit --no-fund
+      - name: Build Functions
+        working-directory: functions
+        run: npm run build
+      - name: Commit fee unification
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add functions/src/developerPayments.ts
+          git commit -m "Make direct developer payments follow admin transaction fees" || true
+          git push origin main
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/153173040202/locations/global/workloadIdentityPools/github-actions/providers/market-cash'
+          service_account: 'market-cash-github-deployer@automarket-fintech.iam.gserviceaccount.com'
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+      - name: Deploy developer payment Functions
+        run: firebase deploy --only functions:marketCashApiCardPayment,functions:marketCashApiCardPaymentByKey --project automarket-fintech --non-interactive
