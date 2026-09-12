@@ -1,0 +1,55 @@
+name: Card UI and security fixes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/card-ui-security-fix-once.yml'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Apply frontend fixes
+        run: python3 scripts/card_ui_biometric_fix.py
+      - name: Apply backend fixes
+        run: python3 scripts/security_backend_fix.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install frontend
+        run: npm install
+      - name: Build frontend
+        run: npm run build
+      - name: Install functions
+        working-directory: functions
+        run: npm install
+      - name: Build functions
+        working-directory: functions
+        run: npm run build
+      - name: Commit fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/CardProductFace.tsx src/components/SecurityConfirmModal.tsx src/pages/client/CardsHub.tsx src/pages/client/CardDetail.tsx src/pages/client/Settings.tsx src/services/deviceSecurityService.ts src/services/localCardPairService.ts functions/src/passkeys.ts functions/src/localCardPairOperations.ts
+          git commit -m "Refine cards, balance display, biometrics and security duration" || true
+          git push origin main
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/153173040202/locations/global/workloadIdentityPools/github-actions/providers/market-cash'
+          service_account: 'market-cash-github-deployer@automarket-fintech.iam.gserviceaccount.com'
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+      - name: Deploy security functions
+        run: firebase deploy --only functions:beginPasskeyAuthentication,functions:finishPasskeyAuthentication,functions:updateSecurityPreferences,functions:revealLocalCardV3 --project automarket-fintech --non-interactive
+      - name: Deploy Hosting
+        run: firebase deploy --only hosting --project automarket-fintech --non-interactive
