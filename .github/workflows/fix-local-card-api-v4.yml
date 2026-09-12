@@ -14,19 +14,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Patch API to current local-card V4 scheme
+      - name: Patch API bridge and final payment API to current local-card V4 scheme
         run: |
           python - <<'PY'
           from pathlib import Path
+
+          # API-key bridge
           p = Path('functions/src/apiKeyCardPayment.ts')
           s = p.read_text()
-          s = s.replace("import { onRequest } from 'firebase-functions/v2/https';", "import { onRequest } from 'firebase-functions/v2/https';\nimport { localCardId, type LocalCardCurrency } from './localCardPair';")
+          if "from './localCardPair'" not in s:
+              s = s.replace("import { onRequest } from 'firebase-functions/v2/https';", "import { onRequest } from 'firebase-functions/v2/https';\nimport { localCardId, type LocalCardCurrency } from './localCardPair';")
           s = s.replace("const localCardIdForUid=(uid:string)=>`local_${sha256(`local-card:${uid}`).slice(0,24)}`;\n", "")
           s = s.replace('4585020002', '5585020002')
           old = "const uid=String(registry.data()?.userId||'').trim();if(!uid)return null;const cardId=localCardIdForUid(uid),cardDoc=await db.doc(`local_cards/${cardId}`).get();"
           new = "const uid=String(registry.data()?.userId||'').trim();if(!uid)return null;const currency=String(registry.data()?.currency||'').toUpperCase() as LocalCardCurrency;if(currency!=='USD'&&currency!=='CDF')return null;const cardId=localCardId(uid,currency),cardDoc=await db.doc(`local_cards/${cardId}`).get();"
+          if old in s:
+              s = s.replace(old, new)
+          p.write_text(s)
+
+          # Final payment API used by the bridge
+          p = Path('functions/src/developerPayments.ts')
+          s = p.read_text()
+          if "from './localCardPair'" not in s:
+              s = s.replace("import { HttpsError, onCall, onRequest } from 'firebase-functions/v2/https';", "import { HttpsError, onCall, onRequest } from 'firebase-functions/v2/https';\nimport { LOCAL_CARD_PREFIX, localCardId, type LocalCardCurrency } from './localCardPair';")
+          s = s.replace("const localCardIdForUid = (uid: string) => `local_${sha256(`local-card:${uid}`).slice(0, 24)}`;\n", "")
+          s = s.replace("if(!/^4585020002\\d{6}$/.test(cardNumber))throw new Error('CARD_INVALID');", "if(!new RegExp(`^${LOCAL_CARD_PREFIX}\\\\d{6}$`).test(cardNumber))throw new Error('CARD_INVALID');")
+          old = "const clientUid=String(registry.data()?.userId||''),cardId=localCardIdForUid(clientUid),txId=`devpay_${sha256(`${auth.appId}:${externalReference}`).slice(0,36)}`,cardRef=db.doc(`local_cards/${cardId}`),cardWalletRef=db.doc(`card_wallet_accounts/${cardAccountId(cardId,currency)}`),developerWalletRef=db.doc(`developer_wallet_accounts/${developerWalletId(auth.developerId,currency)}`),billingRef=db.doc(`developer_billing_accounts/${billingAccountId(auth.developerId)}`),apiRevenueRef=db.doc(`platform_revenue_accounts/${apiRevenueId(currency)}`),txRef=db.doc(`wallet_transactions/${txId}`),securityRef=db.doc(`user_security/${clientUid}`);"
+          new = "const clientUid=String(registry.data()?.userId||'').trim(),registryCurrency=String(registry.data()?.currency||'').toUpperCase() as LocalCardCurrency;if(!clientUid)throw new Error('CARD_NOT_FOUND');if(registryCurrency!=='USD'&&registryCurrency!=='CDF')throw new Error('CARD_NOT_FOUND');if(registryCurrency!==currency)throw new Error('CURRENCY_NOT_ALLOWED');const cardId=localCardId(clientUid,registryCurrency),txId=`devpay_${sha256(`${auth.appId}:${externalReference}`).slice(0,36)}`,cardRef=db.doc(`local_cards/${cardId}`),cardWalletRef=db.doc(`card_wallet_accounts/${cardAccountId(cardId,registryCurrency)}`),developerWalletRef=db.doc(`developer_wallet_accounts/${developerWalletId(auth.developerId,currency)}`),billingRef=db.doc(`developer_billing_accounts/${billingAccountId(auth.developerId)}`),apiRevenueRef=db.doc(`platform_revenue_accounts/${apiRevenueId(currency)}`),txRef=db.doc(`wallet_transactions/${txId}`),securityRef=db.doc(`user_security/${clientUid}`);"
           if old not in s:
-              raise SystemExit('Legacy card identity block not found')
+              raise SystemExit('Legacy final payment card-resolution block not found')
           s = s.replace(old, new)
           p.write_text(s)
           PY
@@ -34,6 +50,10 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add functions/src/apiKeyCardPayment.ts
-          git commit -m "Support Market-Cash V4 5585 local cards in API"
+          git add functions/src/apiKeyCardPayment.ts functions/src/developerPayments.ts
+          if git diff --cached --quiet; then
+            echo "Nothing to patch"
+            exit 0
+          fi
+          git commit -m "Fix Market-Cash V4 final card payment validation"
           git push
