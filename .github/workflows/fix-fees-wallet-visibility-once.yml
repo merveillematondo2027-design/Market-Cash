@@ -1,0 +1,264 @@
+name: Fix fees, commissions and wallet visibility
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-fees-wallet-visibility-once.yml'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  patch-build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Patch fee engine and UI
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, label):
+              p=Path(path); s=p.read_text()
+              if old not in s:
+                  raise SystemExit(f'PATCH_NOT_FOUND {label} in {path}')
+              p.write_text(s.replace(old,new,1))
+              print('patched', label)
+
+          # Shared transaction fee engine.
+          Path('functions/src/transactionFees.ts').write_text(r'''import { getApps, initializeApp } from 'firebase-admin/app';
+          import { getFirestore } from 'firebase-admin/firestore';
+
+          if (!getApps().length) initializeApp();
+          const db = getFirestore();
+
+          export type FeeCurrency = 'USD' | 'CDF';
+          export type FeeAction = 'merchant_payment' | 'market_cash_transfer' | 'wallet_to_card' | 'agent_cash_in' | 'agent_cash_out' | 'mobile_money_withdrawal' | 'bank_withdrawal';
+
+          export const DEFAULT_TRANSACTION_FEES: Record<FeeAction,{percent:number;minUsd:number;minCdf:number;chargedTo:string}> = {
+            merchant_payment: { percent: 2.0, minUsd: 0.10, minCdf: 250, chargedTo: 'payer' },
+            market_cash_transfer: { percent: 1.5, minUsd: 0.05, minCdf: 150, chargedTo: 'sender' },
+            wallet_to_card: { percent: 0, minUsd: 0, minCdf: 0, chargedTo: 'none' },
+            agent_cash_in: { percent: 1.0, minUsd: 0.05, minCdf: 100, chargedTo: 'platform_commission' },
+            agent_cash_out: { percent: 3.5, minUsd: 0.15, minCdf: 350, chargedTo: 'client' },
+            mobile_money_withdrawal: { percent: 4.0, minUsd: 0.20, minCdf: 500, chargedTo: 'client' },
+            bank_withdrawal: { percent: 3.0, minUsd: 0.20, minCdf: 500, chargedTo: 'client' },
+          };
+
+          const roundMoney=(value:number)=>Math.round(value*100)/100;
+          export async function transactionFee(action:FeeAction,currency:FeeCurrency,amount:number){
+            const configured=(await db.doc('app_settings/transaction_fees').get()).data() || {};
+            const base=DEFAULT_TRANSACTION_FEES[action];
+            const override=(configured as any)[action] || {};
+            const percent=Number.isFinite(Number(override.percent))?Number(override.percent):base.percent;
+            const minUsd=Number.isFinite(Number(override.minUsd))?Number(override.minUsd):base.minUsd;
+            const minCdf=Number.isFinite(Number(override.minCdf))?Number(override.minCdf):base.minCdf;
+            if(action==='wallet_to_card') return 0;
+            const minimum=currency==='USD'?minUsd:minCdf;
+            return roundMoney(Math.max(amount*percent/100,minimum));
+          }
+
+          export function transactionRevenueAccountId(currency:FeeCurrency){return `market_cash_transaction_fees_${currency.toLowerCase()}`;}
+          export const roundTransactionMoney=roundMoney;
+          ''').replace('          ','')
+
+          # security.ts: imports + fee-aware transfer/payment/cash-out. Wallet->card remains free.
+          p=Path('functions/src/security.ts'); s=p.read_text()
+          s=s.replace("import { getFirestore } from 'firebase-admin/firestore';", "import { FieldValue, getFirestore } from 'firebase-admin/firestore';\nimport { transactionFee, transactionRevenueAccountId, roundTransactionMoney } from './transactionFees';",1)
+
+          old="""    if (Number(sender.availableBalance || 0) < amount) throw new HttpsError('failed-precondition', 'Solde insuffisant.');
+    const now = Date.now();
+    const reference = `MC-TRF-${now}`;
+    tx.update(senderWalletRef, { availableBalance: Number(sender.availableBalance || 0) - amount, ledgerBalance: Number(sender.ledgerBalance || 0) - amount, updatedAt: now });
+    tx.update(recipientWalletRef, { availableBalance: Number(recipient.availableBalance || 0) + amount, ledgerBalance: Number(recipient.ledgerBalance || 0) + amount, updatedAt: now });
+    tx.set(txRef, { id: txId, reference, type: 'local_transfer', status: 'settled', currency, amount, senderId: senderUid, recipientId: recipientUid, userIds: [senderUid, recipientUid], sourceWalletId: senderWalletRef.id, destinationWalletId: recipientWalletRef.id, rail: 'market_cash_local', authenticatedBy: 'local_cvv', createdAt: now, updatedAt: now });
+    tx.set(db.collection('ledger_entries').doc(), { transactionId: txId, walletId: senderWalletRef.id, userId: senderUid, direction: 'debit', amount, currency, createdAt: now });
+    tx.set(db.collection('ledger_entries').doc(), { transactionId: txId, walletId: recipientWalletRef.id, userId: recipientUid, direction: 'credit', amount, currency, createdAt: now });"""
+          new="""    const feeAmount = await transactionFee('market_cash_transfer', currency, amount);
+    const totalDebited = roundTransactionMoney(amount + feeAmount);
+    if (Number(sender.availableBalance || 0) < totalDebited) throw new HttpsError('failed-precondition', 'Solde insuffisant, frais compris.');
+    const now = Date.now();
+    const reference = `MC-TRF-${now}`;
+    const revenueRef=db.doc(`platform_revenue_accounts/${transactionRevenueAccountId(currency)}`);
+    tx.update(senderWalletRef, { availableBalance: roundTransactionMoney(Number(sender.availableBalance || 0) - totalDebited), ledgerBalance: roundTransactionMoney(Number(sender.ledgerBalance || 0) - totalDebited), updatedAt: now });
+    tx.update(recipientWalletRef, { availableBalance: roundTransactionMoney(Number(recipient.availableBalance || 0) + amount), ledgerBalance: roundTransactionMoney(Number(recipient.ledgerBalance || 0) + amount), updatedAt: now });
+    tx.set(revenueRef,{id:revenueRef.id,currency,availableBalance:FieldValue.increment(feeAmount),ledgerBalance:FieldValue.increment(feeAmount),updatedAt:now,createdAt:now},{merge:true});
+    tx.set(txRef, { id: txId, reference, type: 'local_transfer', status: 'settled', currency, amount, feeAmount, totalDebited, senderId: senderUid, recipientId: recipientUid, userIds: [senderUid, recipientUid], sourceWalletId: senderWalletRef.id, destinationWalletId: recipientWalletRef.id, rail: 'market_cash_local', authenticatedBy: 'local_cvv', createdAt: now, updatedAt: now });
+    tx.set(db.collection('ledger_entries').doc(), { transactionId: txId, walletId: senderWalletRef.id, userId: senderUid, direction: 'debit', amount:totalDebited, currency, entryType:'transfer_total_debit', createdAt: now });
+    tx.set(db.collection('ledger_entries').doc(), { transactionId: txId, walletId: recipientWalletRef.id, userId: recipientUid, direction: 'credit', amount, currency, entryType:'transfer_received', createdAt: now });
+    tx.set(db.collection('ledger_entries').doc(), { transactionId: txId, revenueWalletId:revenueRef.id, direction:'credit', amount:feeAmount, currency, entryType:'market_cash_transfer_fee', createdAt:now });"""
+          if old not in s: raise SystemExit('PATCH_NOT_FOUND secure transfer')
+          s=s.replace(old,new,1)
+
+          old="""    if (Number(cardBalance.availableBalance || 0) < amount) throw new HttpsError('failed-precondition', 'Solde de la carte locale insuffisant.');
+    const now = Date.now();
+    const reference = `MC-PAY-${now}`;
+    tx.update(cardBalanceRef, { availableBalance: Number(cardBalance.availableBalance || 0) - amount, ledgerBalance: Number(cardBalance.ledgerBalance || 0) - amount, updatedAt: now });
+    tx.update(merchantWalletRef, { availableBalance: Number(merchantWallet.availableBalance || 0) + amount, ledgerBalance: Number(merchantWallet.ledgerBalance || 0) + amount, updatedAt: now });
+    tx.set(txRef, { id: txId, reference, type: 'merchant_payment', status: 'settled', currency, amount, senderId: payerUid, recipientId: merchant.merchantUid, merchantId: merchant.merchantUid, merchantMarketCashId: merchant.marketCashId, merchantName: merchant.displayName, cardId: card.cardId, userIds: [payerUid, merchant.merchantUid], sourceCardWalletId: cardBalanceRef.id, destinationWalletId: merchantWalletRef.id, rail: 'market_cash_local_card_merchant', authenticatedBy: 'local_cvv', createdAt: now, updatedAt: now });
+    tx.set(db.collection('ledger_entries').doc(), { transactionId: txId, cardWalletId: cardBalanceRef.id, userId: payerUid, direction: 'debit', amount, currency, createdAt: now });
+    tx.set(db.collection('ledger_entries').doc(), { transactionId: txId, walletId: merchantWalletRef.id, userId: merchant.merchantUid, direction: 'credit', amount, currency, createdAt: now });"""
+          new="""    const feeAmount=await transactionFee('merchant_payment',currency,amount);
+    const totalDebited=roundTransactionMoney(amount+feeAmount);
+    if (Number(cardBalance.availableBalance || 0) < totalDebited) throw new HttpsError('failed-precondition', 'Solde de la carte locale insuffisant, frais compris.');
+    const now = Date.now();
+    const reference = `MC-PAY-${now}`;
+    const revenueRef=db.doc(`platform_revenue_accounts/${transactionRevenueAccountId(currency)}`);
+    tx.update(cardBalanceRef, { availableBalance: roundTransactionMoney(Number(cardBalance.availableBalance || 0) - totalDebited), ledgerBalance: roundTransactionMoney(Number(cardBalance.ledgerBalance || 0) - totalDebited), updatedAt: now });
+    tx.update(merchantWalletRef, { availableBalance: roundTransactionMoney(Number(merchantWallet.availableBalance || 0) + amount), ledgerBalance: roundTransactionMoney(Number(merchantWallet.ledgerBalance || 0) + amount), updatedAt: now });
+    tx.set(revenueRef,{id:revenueRef.id,currency,availableBalance:FieldValue.increment(feeAmount),ledgerBalance:FieldValue.increment(feeAmount),updatedAt:now,createdAt:now},{merge:true});
+    tx.set(txRef, { id: txId, reference, type: 'merchant_payment', status: 'settled', currency, amount, feeAmount, totalDebited, senderId: payerUid, recipientId: merchant.merchantUid, merchantId: merchant.merchantUid, merchantMarketCashId: merchant.marketCashId, merchantName: merchant.displayName, cardId: card.cardId, userIds: [payerUid, merchant.merchantUid], sourceCardWalletId: cardBalanceRef.id, destinationWalletId: merchantWalletRef.id, rail: 'market_cash_local_card_merchant', authenticatedBy: 'local_cvv', createdAt: now, updatedAt: now });
+    tx.set(db.collection('ledger_entries').doc(), { transactionId: txId, cardWalletId: cardBalanceRef.id, userId: payerUid, direction: 'debit', amount:totalDebited, currency, entryType:'merchant_payment_total_debit', createdAt: now });
+    tx.set(db.collection('ledger_entries').doc(), { transactionId: txId, walletId: merchantWalletRef.id, userId: merchant.merchantUid, direction: 'credit', amount, currency, entryType:'merchant_payment_received', createdAt: now });
+    tx.set(db.collection('ledger_entries').doc(), { transactionId:txId,revenueWalletId:revenueRef.id,direction:'credit',amount:feeAmount,currency,entryType:'merchant_payment_fee',createdAt:now });"""
+          if old not in s: raise SystemExit('PATCH_NOT_FOUND secure merchant')
+          s=s.replace(old,new,1)
+
+          old="""    if (Number(cardBalance.availableBalance || 0) < amount) throw new HttpsError('failed-precondition', 'Solde de la carte locale insuffisant.');
+    const now = Date.now();
+    const reference = `MC-RET-${now}`;
+    tx.update(cardBalanceRef, { availableBalance: Number(cardBalance.availableBalance || 0) - amount, ledgerBalance: Number(cardBalance.ledgerBalance || 0) - amount, updatedAt: now });
+    tx.update(agentWalletRef, { availableBalance: Number(agentWallet.availableBalance || 0) + amount, ledgerBalance: Number(agentWallet.ledgerBalance || 0) + amount, updatedAt: now });
+    tx.set(txRef, { id: txId, reference, type: 'cash_out', status: 'settled', currency, amount, agentId: agentUid, clientId: resolved.clientUid, cardId: resolved.snap.id, cardIdentifier: resolved.card.cardIdentifier || resolved.snap.id, userIds: [agentUid, resolved.clientUid], sourceCardWalletId: cardBalanceRef.id, destinationWalletId: agentWalletRef.id, rail: 'agent_terminal_local_card', authenticatedBy: 'local_cvv_on_agent_terminal', createdAt: now, updatedAt: now });
+    tx.set(db.collection('ledger_entries').doc(), { transactionId: txId, cardWalletId: cardBalanceRef.id, userId: resolved.clientUid, direction: 'debit', amount, currency, createdAt: now });
+    tx.set(db.collection('ledger_entries').doc(), { transactionId: txId, walletId: agentWalletRef.id, userId: agentUid, direction: 'credit', amount, currency, createdAt: now });"""
+          new="""    const feeAmount=await transactionFee('agent_cash_out',currency,amount);
+    const totalDebited=roundTransactionMoney(amount+feeAmount);
+    if (Number(cardBalance.availableBalance || 0) < totalDebited) throw new HttpsError('failed-precondition', 'Solde de la carte locale insuffisant, frais compris.');
+    const now = Date.now();
+    const reference = `MC-RET-${now}`;
+    const revenueRef=db.doc(`platform_revenue_accounts/${transactionRevenueAccountId(currency)}`);
+    tx.update(cardBalanceRef, { availableBalance: roundTransactionMoney(Number(cardBalance.availableBalance || 0) - totalDebited), ledgerBalance: roundTransactionMoney(Number(cardBalance.ledgerBalance || 0) - totalDebited), updatedAt: now });
+    tx.update(agentWalletRef, { availableBalance: roundTransactionMoney(Number(agentWallet.availableBalance || 0) + amount), ledgerBalance: roundTransactionMoney(Number(agentWallet.ledgerBalance || 0) + amount), updatedAt: now });
+    tx.set(revenueRef,{id:revenueRef.id,currency,availableBalance:FieldValue.increment(feeAmount),ledgerBalance:FieldValue.increment(feeAmount),updatedAt:now,createdAt:now},{merge:true});
+    tx.set(txRef, { id: txId, reference, type: 'cash_out', status: 'settled', currency, amount, feeAmount, totalDebited, agentId: agentUid, clientId: resolved.clientUid, cardId: resolved.snap.id, cardIdentifier: resolved.card.cardIdentifier || resolved.snap.id, userIds: [agentUid, resolved.clientUid], sourceCardWalletId: cardBalanceRef.id, destinationWalletId: agentWalletRef.id, rail: 'agent_terminal_local_card', authenticatedBy: 'local_cvv_on_agent_terminal', createdAt: now, updatedAt: now });
+    tx.set(db.collection('ledger_entries').doc(), { transactionId: txId, cardWalletId: cardBalanceRef.id, userId: resolved.clientUid, direction: 'debit', amount:totalDebited, currency, entryType:'cash_out_total_debit', createdAt: now });
+    tx.set(db.collection('ledger_entries').doc(), { transactionId: txId, walletId: agentWalletRef.id, userId: agentUid, direction: 'credit', amount, currency, entryType:'cash_out_agent_settlement', createdAt: now });
+    tx.set(db.collection('ledger_entries').doc(), { transactionId:txId,revenueWalletId:revenueRef.id,direction:'credit',amount:feeAmount,currency,entryType:'cash_out_fee',createdAt:now });"""
+          if old not in s: raise SystemExit('PATCH_NOT_FOUND secure cashout')
+          s=s.replace(old,new,1)
+
+          # Explicitly mark internal wallet->card as free.
+          s=s.replace("type: 'wallet_to_local_card', status: 'settled', currency, amount, userId: uid", "type: 'wallet_to_local_card', status: 'settled', currency, amount, feeAmount:0, totalDebited:amount, userId: uid",1)
+          p.write_text(s)
+          print('patched security.ts')
+
+          # identityV2.ts: active merchant V2 and agent deposit V2.
+          p=Path('functions/src/identityV2.ts'); s=p.read_text()
+          s=s.replace("import {getFirestore} from 'firebase-admin/firestore';", "import {FieldValue,getFirestore} from 'firebase-admin/firestore';\nimport {transactionFee,transactionRevenueAccountId,roundTransactionMoney} from './transactionFees';",1)
+
+          old="""    if(!ad||!cd||ad.status!=='active'||cd.status!=='active')throw new HttpsError('failed-precondition','Portefeuille indisponible.');if(Number(ad.availableBalance||0)<amount)throw new HttpsError('failed-precondition','Float Agent insuffisant.');
+    const now=Date.now(),reference=`MC-DEP-${now}`;tx.update(agentRef,{availableBalance:Number(ad.availableBalance||0)-amount,ledgerBalance:Number(ad.ledgerBalance||0)-amount,updatedAt:now});tx.update(clientRef,{availableBalance:Number(cd.availableBalance||0)+amount,ledgerBalance:Number(cd.ledgerBalance||0)+amount,updatedAt:now});
+    tx.set(txRef,{id:txId,reference,type:'cash_in',status:'settled',currency,amount,agentId:agentUid,clientId:client.uid,clientMarketCashId:client.identity.marketCashId,userIds:[agentUid,client.uid],sourceWalletId:agentRef.id,destinationWalletId:clientRef.id,rail:'agent_terminal_market_cash_v2',authenticatedBy:'agent_application_secret',createdAt:now,updatedAt:now});
+    tx.set(db.collection('ledger_entries').doc(),{transactionId:txId,walletId:agentRef.id,userId:agentUid,direction:'debit',amount,currency,createdAt:now});tx.set(db.collection('ledger_entries').doc(),{transactionId:txId,walletId:clientRef.id,userId:client.uid,direction:'credit',amount,currency,createdAt:now});"""
+          new="""    if(!ad||!cd||ad.status!=='active'||cd.status!=='active')throw new HttpsError('failed-precondition','Portefeuille indisponible.');if(Number(ad.availableBalance||0)<amount)throw new HttpsError('failed-precondition','Float Agent insuffisant.');
+    const agentCommissionAmount=await transactionFee('agent_cash_in',currency,amount);const netAgentDebit=roundTransactionMoney(Math.max(0,amount-agentCommissionAmount));
+    const now=Date.now(),reference=`MC-DEP-${now}`;tx.update(agentRef,{availableBalance:roundTransactionMoney(Number(ad.availableBalance||0)-netAgentDebit),ledgerBalance:roundTransactionMoney(Number(ad.ledgerBalance||0)-netAgentDebit),updatedAt:now});tx.update(clientRef,{availableBalance:roundTransactionMoney(Number(cd.availableBalance||0)+amount),ledgerBalance:roundTransactionMoney(Number(cd.ledgerBalance||0)+amount),updatedAt:now});
+    tx.set(txRef,{id:txId,reference,type:'cash_in',status:'settled',currency,amount,feeAmount:0,totalDebited:amount,agentCommissionAmount,agentNetFloatDebit:netAgentDebit,agentId:agentUid,clientId:client.uid,clientMarketCashId:client.identity.marketCashId,userIds:[agentUid,client.uid],sourceWalletId:agentRef.id,destinationWalletId:clientRef.id,rail:'agent_terminal_market_cash_v2',authenticatedBy:'agent_application_secret',createdAt:now,updatedAt:now});
+    tx.set(db.collection('ledger_entries').doc(),{transactionId:txId,walletId:agentRef.id,userId:agentUid,direction:'debit',amount,currency,entryType:'agent_cash_in_gross',createdAt:now});tx.set(db.collection('ledger_entries').doc(),{transactionId:txId,walletId:agentRef.id,userId:agentUid,direction:'credit',amount:agentCommissionAmount,currency,entryType:'agent_cash_in_commission',createdAt:now});tx.set(db.collection('ledger_entries').doc(),{transactionId:txId,walletId:clientRef.id,userId:client.uid,direction:'credit',amount,currency,entryType:'client_cash_in_received',createdAt:now});"""
+          if old not in s: raise SystemExit('PATCH_NOT_FOUND v2 cashin')
+          s=s.replace(old,new,1)
+
+          old="""const[s,d]=await Promise.all([tx.get(source),tx.get(destination)]);const sd=s.data(),dd=d.data();if(!sd||!dd||sd.status!=='active'||dd.status!=='active')throw new HttpsError('failed-precondition','Compte de paiement indisponible.');if(Number(sd.availableBalance||0)<amount)throw new HttpsError('failed-precondition','Solde de la carte locale insuffisant.');
+    const now=Date.now(),reference=`MC-PAY-${now}`,merchantName=String(profile.data()?.tradeName||merchant.user.data()?.displayName||'Marchand Market-Cash');tx.update(source,{availableBalance:Number(sd.availableBalance||0)-amount,ledgerBalance:Number(sd.ledgerBalance||0)-amount,updatedAt:now});tx.update(destination,{availableBalance:Number(dd.availableBalance||0)+amount,ledgerBalance:Number(dd.ledgerBalance||0)+amount,updatedAt:now});
+    tx.set(txRef,{id:txId,reference,type:'merchant_payment',status:'settled',currency,amount,senderId:payerUid,recipientId:merchant.uid,merchantId:merchant.uid,merchantMarketCashId:merchant.identity.marketCashId,merchantName,cardId,userIds:[payerUid,merchant.uid],sourceCardWalletId:source.id,destinationWalletId:destination.id,rail:'market_cash_local_card_merchant_v2',authenticatedBy:'local_cvv',createdAt:now,updatedAt:now});
+    tx.set(db.collection('ledger_entries').doc(),{transactionId:txId,cardWalletId:source.id,userId:payerUid,direction:'debit',amount,currency,createdAt:now});tx.set(db.collection('ledger_entries').doc(),{transactionId:txId,walletId:destination.id,userId:merchant.uid,direction:'credit',amount,currency,createdAt:now});"""
+          new="""const[s,d]=await Promise.all([tx.get(source),tx.get(destination)]);const sd=s.data(),dd=d.data();if(!sd||!dd||sd.status!=='active'||dd.status!=='active')throw new HttpsError('failed-precondition','Compte de paiement indisponible.');const feeAmount=await transactionFee('merchant_payment',currency,amount),totalDebited=roundTransactionMoney(amount+feeAmount);if(Number(sd.availableBalance||0)<totalDebited)throw new HttpsError('failed-precondition','Solde de la carte locale insuffisant, frais compris.');
+    const now=Date.now(),reference=`MC-PAY-${now}`,merchantName=String(profile.data()?.tradeName||merchant.user.data()?.displayName||'Marchand Market-Cash'),revenueRef=db.doc(`platform_revenue_accounts/${transactionRevenueAccountId(currency)}`);tx.update(source,{availableBalance:roundTransactionMoney(Number(sd.availableBalance||0)-totalDebited),ledgerBalance:roundTransactionMoney(Number(sd.ledgerBalance||0)-totalDebited),updatedAt:now});tx.update(destination,{availableBalance:roundTransactionMoney(Number(dd.availableBalance||0)+amount),ledgerBalance:roundTransactionMoney(Number(dd.ledgerBalance||0)+amount),updatedAt:now});tx.set(revenueRef,{id:revenueRef.id,currency,availableBalance:FieldValue.increment(feeAmount),ledgerBalance:FieldValue.increment(feeAmount),updatedAt:now,createdAt:now},{merge:true});
+    tx.set(txRef,{id:txId,reference,type:'merchant_payment',status:'settled',currency,amount,feeAmount,totalDebited,senderId:payerUid,recipientId:merchant.uid,merchantId:merchant.uid,merchantMarketCashId:merchant.identity.marketCashId,merchantName,cardId,userIds:[payerUid,merchant.uid],sourceCardWalletId:source.id,destinationWalletId:destination.id,rail:'market_cash_local_card_merchant_v2',authenticatedBy:'local_cvv',createdAt:now,updatedAt:now});
+    tx.set(db.collection('ledger_entries').doc(),{transactionId:txId,cardWalletId:source.id,userId:payerUid,direction:'debit',amount:totalDebited,currency,entryType:'merchant_payment_total_debit',createdAt:now});tx.set(db.collection('ledger_entries').doc(),{transactionId:txId,walletId:destination.id,userId:merchant.uid,direction:'credit',amount,currency,entryType:'merchant_payment_received',createdAt:now});tx.set(db.collection('ledger_entries').doc(),{transactionId:txId,revenueWalletId:revenueRef.id,direction:'credit',amount:feeAmount,currency,entryType:'merchant_payment_fee',createdAt:now});"""
+          if old not in s: raise SystemExit('PATCH_NOT_FOUND v2 merchant')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          print('patched identityV2.ts')
+
+          # developerPayments: direct API client pays fee on top, developer receives full purchase amount.
+          p=Path('functions/src/developerPayments.ts'); s=p.read_text()
+          old="""      const cardBalance=Number(cardWallet.data()?.availableBalance||0);if(cardBalance<amount)throw new Error('INSUFFICIENT_FUNDS');
+      let platformFee=0,billingAfter:number|null=null,billingModel='percentage_from_received_amount';
+      if(partner){if(!billing?.exists||billing.data()?.status!=='active')throw new Error('API_BILLING_ACCOUNT_INACTIVE');const billingBalance=Number(billing.data()?.availableBalance||0);if(billingBalance<pricing.wholesaleUsd)throw new Error('API_BILLING_BALANCE_LOW');platformFee=pricing.wholesaleUsd;billingAfter=roundMoney(billingBalance-platformFee);billingModel='partner_prepaid_flat_per_successful_request';}
+      else platformFee=roundMoney(amount*pricing.directPercent/100);
+      const developerNet=partner?amount:roundMoney(Math.max(0,amount-platformFee));
+      const developerBalance=Number(developerWallet.data()?.availableBalance||0),apiRevenueBalance=Number(apiRevenue.data()?.availableBalance||0),now=Date.now(),reference=`MC-PAY-${now}-${randomBytes(3).toString('hex').toUpperCase()}`,cardBalanceAfter=roundMoney(cardBalance-amount),developerBalanceAfter=roundMoney(developerBalance+developerNet),apiRevenueAfter=roundMoney(apiRevenueBalance+platformFee);"""
+          new="""      const cardBalance=Number(cardWallet.data()?.availableBalance||0);
+      let platformFee=0,billingAfter:number|null=null,billingModel='percentage_from_received_amount';
+      if(partner){if(!billing?.exists||billing.data()?.status!=='active')throw new Error('API_BILLING_ACCOUNT_INACTIVE');const billingBalance=Number(billing.data()?.availableBalance||0);if(billingBalance<pricing.wholesaleUsd)throw new Error('API_BILLING_BALANCE_LOW');platformFee=pricing.wholesaleUsd;billingAfter=roundMoney(billingBalance-platformFee);billingModel='partner_prepaid_flat_per_successful_request';}
+      else platformFee=roundMoney(amount*pricing.directPercent/100);
+      const clientFeeAmount=partner?0:platformFee,totalDebited=roundMoney(amount+clientFeeAmount);if(cardBalance<totalDebited)throw new Error('INSUFFICIENT_FUNDS');
+      const developerNet=amount;
+      const developerBalance=Number(developerWallet.data()?.availableBalance||0),apiRevenueBalance=Number(apiRevenue.data()?.availableBalance||0),now=Date.now(),reference=`MC-PAY-${now}-${randomBytes(3).toString('hex').toUpperCase()}`,cardBalanceAfter=roundMoney(cardBalance-totalDebited),developerBalanceAfter=roundMoney(developerBalance+developerNet),apiRevenueAfter=roundMoney(apiRevenueBalance+platformFee);"""
+          if old not in s: raise SystemExit('PATCH_NOT_FOUND developer calc')
+          s=s.replace(old,new,1)
+          s=s.replace("currency,amount,feeAmount:platformFee,clientFeeAmount:0,totalDebited:amount,netAmount:developerNet", "currency,amount,feeAmount:clientFeeAmount,clientFeeAmount,totalDebited,netAmount:developerNet",1)
+          s=s.replace("direction:'debit',amount,currency,entryType:'client_card_payment'", "direction:'debit',amount:totalDebited,currency,entryType:'client_card_payment_total'",1)
+          s=s.replace("amount,feeAmount:(result as any).feeAmount||0,netAmount:(result as any).netAmount??amount,totalDebited:amount", "amount,feeAmount:(result as any).feeAmount||0,netAmount:(result as any).netAmount??amount,totalDebited:(result as any).totalDebited??amount",1)
+          p.write_text(s)
+          print('patched developerPayments.ts')
+
+          # Client home: wallet ID is always visible; PIN protects balance only.
+          p=Path('src/pages/client/ClientHome.tsx'); s=p.read_text()
+          s=s.replace("ID {revealed?marketCashId:'MCW-••••••••••'}", "ID {marketCashId}",1)
+          s=s.replace("subtitle=\"Entrez le PIN de l’application pour afficher le solde et votre identifiant Market-Cash.\"", "subtitle=\"Entrez le PIN de l’application pour afficher le solde. Votre ID Wallet reste toujours visible.\"",1)
+          p.write_text(s); print('patched ClientHome.tsx')
+
+          # WalletAction: receive ID/QR and transactions never require application PIN.
+          p=Path('src/pages/client/WalletAction.tsx'); s=p.read_text()
+          old="""{action==='receive'&&<div className=\"mt-6\">{secure.revealed?<div className=\"rounded-3xl bg-slate-50 p-5 text-center\"><div className=\"mx-auto inline-block rounded-3xl bg-white p-4 shadow-sm\">{identity?<QRCodeSVG value={`MARKET-CASH-WALLET:${identity}`} size={190}/>:<div className=\"grid h-[190px] w-[190px] place-items-center text-slate-400\">Chargement…</div>}</div><p className=\"mt-4 text-xs font-black uppercase text-slate-400\">Votre ID Wallet</p><p className=\"mt-1 font-mono text-xl font-black text-blue-950\">{identity||'—'}</p><p className=\"mt-2 text-xs text-slate-500\">Partagez cet ID pour recevoir un transfert Market-Cash.</p></div>:<button onClick={secure.request} className=\"w-full rounded-3xl border border-blue-200 bg-blue-50 p-6 text-center text-blue-950\"><QrCode className=\"mx-auto\"/><b className=\"mt-3 block\">Afficher mon ID et mon QR</b><span className=\"mt-1 block text-xs text-blue-700\">Code secret de l'application requis.</span></button>}</div>}"""
+          new="""{action==='receive'&&<div className=\"mt-6\"><div className=\"rounded-3xl bg-slate-50 p-5 text-center\"><div className=\"mx-auto inline-block rounded-3xl bg-white p-4 shadow-sm\">{identity?<QRCodeSVG value={`MARKET-CASH-WALLET:${identity}`} size={190}/>:<div className=\"grid h-[190px] w-[190px] place-items-center text-slate-400\">Chargement…</div>}</div><p className=\"mt-4 text-xs font-black uppercase text-slate-400\">Votre ID Wallet</p><p className=\"mt-1 font-mono text-xl font-black text-blue-950\">{identity||'—'}</p><p className=\"mt-2 text-xs text-slate-500\">Partagez cet ID pour recevoir un transfert Market-Cash.</p></div></div>}"""
+          if old not in s: raise SystemExit('PATCH_NOT_FOUND receive visibility')
+          s=s.replace(old,new,1)
+          old="""{action==='transactions'&&<div className=\"mt-6\">{!secure.revealed?<button onClick={secure.request} className=\"w-full rounded-3xl border bg-slate-50 p-6 text-center\"><History className=\"mx-auto text-blue-800\"/><b className=\"mt-3 block\">Afficher mon historique</b><span className=\"mt-1 block text-xs text-slate-500\">Protégé par le code secret de l'application.</span></button>:<div className=\"space-y-3\">{history.length===0?<div className=\"rounded-2xl bg-slate-50 p-6 text-center text-sm text-slate-500\">Aucune transaction.</div>:history.map((t:any)=><div key={t.id||t.reference} className=\"rounded-2xl border p-4\"><div className=\"flex items-start justify-between gap-3\"><div><b className=\"text-sm\">{String(t.type||'Transaction').replaceAll('_',' ')}</b><p className=\"mt-1 font-mono text-[10px] text-slate-400\">{t.reference||t.id}</p></div><b>{fmt(Number(t.amount||0),t.currency==='CDF'?'CDF':'USD')}</b></div><p className=\"mt-2 text-[10px] text-slate-400\">{t.createdAt?new Date(t.createdAt).toLocaleString('fr-FR'):'—'}</p></div>)}</div>}</div>}"""
+          new="""{action==='transactions'&&<div className=\"mt-6\"><div className=\"space-y-3\">{history.length===0?<div className=\"rounded-2xl bg-slate-50 p-6 text-center text-sm text-slate-500\">Aucune transaction.</div>:history.map((t:any)=><div key={t.id||t.reference} className=\"rounded-2xl border p-4\"><div className=\"flex items-start justify-between gap-3\"><div><b className=\"text-sm\">{String(t.type||'Transaction').replaceAll('_',' ')}</b><p className=\"mt-1 font-mono text-[10px] text-slate-400\">{t.reference||t.id}</p></div><b>{fmt(Number(t.amount||0),t.currency==='CDF'?'CDF':'USD')}</b></div>{Number(t.feeAmount||0)>0&&<p className=\"mt-2 text-xs font-bold text-amber-700\">Frais : {fmt(Number(t.feeAmount||0),t.currency==='CDF'?'CDF':'USD')} · Total débité : {fmt(Number(t.totalDebited||t.amount||0),t.currency==='CDF'?'CDF':'USD')}</p>}{Number(t.agentCommissionAmount||0)>0&&<p className=\"mt-2 text-xs font-bold text-emerald-700\">Commission agent : {fmt(Number(t.agentCommissionAmount||0),t.currency==='CDF'?'CDF':'USD')}</p>}<p className=\"mt-2 text-[10px] text-slate-400\">{t.createdAt?new Date(t.createdAt).toLocaleString('fr-FR'):'—'}</p></div>)}</div></div>}"""
+          if old not in s: raise SystemExit('PATCH_NOT_FOUND transaction visibility')
+          s=s.replace(old,new,1)
+          p.write_text(s); print('patched WalletAction.tsx')
+          PY
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install frontend dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Install Functions dependencies
+        working-directory: functions
+        run: npm install --no-audit --no-fund
+
+      - name: Build Functions
+        working-directory: functions
+        run: npm run build
+
+      - name: Commit corrected fee model
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add functions/src/transactionFees.ts functions/src/security.ts functions/src/identityV2.ts functions/src/developerPayments.ts src/pages/client/ClientHome.tsx src/pages/client/WalletAction.tsx
+          git commit -m "Fix transaction fees commissions and wallet visibility"
+          git push origin main
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/153173040202/locations/global/workloadIdentityPools/github-actions/providers/market-cash'
+          service_account: 'market-cash-github-deployer@automarket-fintech.iam.gserviceaccount.com'
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Deploy affected Functions
+        run: firebase deploy --only functions:marketCashApiCardPayment,functions:marketCashApiCardPaymentByKey,functions:marketCashTransferWithCvv,functions:merchantPaymentFromLocalCardWithCvvV2,functions:agentLocalCardCashOutWithCvv,functions:agentCashInByMarketCashIdV2 --project automarket-fintech --non-interactive
+
+      - name: Deploy frontend Hosting
+        run: firebase deploy --only hosting --project automarket-fintech --non-interactive
