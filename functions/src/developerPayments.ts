@@ -3,6 +3,7 @@ import { getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { HttpsError, onCall, onRequest } from 'firebase-functions/v2/https';
 import { LOCAL_CARD_PREFIX, localCardId, type LocalCardCurrency } from './localCardPair';
+import { transactionFee, DEFAULT_TRANSACTION_FEES } from './transactionFees';
 
 if (!getApps().length) initializeApp();
 const db = getFirestore();
@@ -52,11 +53,18 @@ const DEFAULT_FEES = {
 type FeeAction = keyof typeof DEFAULT_FEES;
 
 async function developerApiPricing() {
-  const configured = (await db.doc('app_settings/developer_api_pricing').get()).data() || {};
-  const directPercent = Number(configured.directPercent);
+  const [apiPricingSnap, transactionFeesSnap] = await Promise.all([
+    db.doc('app_settings/developer_api_pricing').get(),
+    db.doc('app_settings/transaction_fees').get(),
+  ]);
+  const configured = apiPricingSnap.data() || {};
+  const feeConfig:any = transactionFeesSnap.data() || {};
+  const merchant:any = feeConfig.merchant_payment || {};
+  const configuredPercent = Number(merchant.percent);
+  const directPercent = merchant.enabled === false ? 0 : Number.isFinite(configuredPercent) && configuredPercent >= 0 && configuredPercent <= 100 ? configuredPercent : DEFAULT_TRANSACTION_FEES.merchant_payment.percent;
   const wholesaleUsd = Number(configured.wholesaleUsd);
   return {
-    directPercent: Number.isFinite(directPercent) && directPercent >= 0 && directPercent <= 100 ? directPercent : 2.5,
+    directPercent,
     wholesaleUsd: roundMoney(Number.isFinite(wholesaleUsd) && wholesaleUsd >= 0 ? wholesaleUsd : 0.05),
   };
 }
@@ -149,7 +157,7 @@ export const marketCashApiCardPayment = onRequest({ region: REGION }, async (req
     if(!new RegExp(`^${LOCAL_CARD_PREFIX}\\d{6}$`).test(cardNumber))throw new Error('CARD_INVALID'); if(!/^\d{3}$/.test(cvv))throw new Error('CVV_INVALID'); if(!/^\d{2}\/\d{2}$/.test(expiry))throw new Error('EXPIRY_INVALID'); if(externalReference.length<6||externalReference.length>120)throw new Error('REFERENCE_INVALID');
     const registry=await db.doc(`card_number_registry/${cardNumber}`).get();if(!registry.exists)throw new Error('CARD_NOT_FOUND');
     const clientUid=String(registry.data()?.userId||'').trim(),registryCurrency=String(registry.data()?.currency||'').toUpperCase() as LocalCardCurrency;if(!clientUid)throw new Error('CARD_NOT_FOUND');if(registryCurrency!=='USD'&&registryCurrency!=='CDF')throw new Error('CARD_NOT_FOUND');if(registryCurrency!==currency)throw new Error('CURRENCY_NOT_ALLOWED');const cardId=localCardId(clientUid,registryCurrency),txId=`devpay_${sha256(`${auth.appId}:${externalReference}`).slice(0,36)}`,cardRef=db.doc(`local_cards/${cardId}`),cardWalletRef=db.doc(`card_wallet_accounts/${cardAccountId(cardId,registryCurrency)}`),developerWalletRef=db.doc(`developer_wallet_accounts/${developerWalletId(auth.developerId,currency)}`),billingRef=db.doc(`developer_billing_accounts/${billingAccountId(auth.developerId)}`),apiRevenueRef=db.doc(`platform_revenue_accounts/${apiRevenueId(currency)}`),txRef=db.doc(`wallet_transactions/${txId}`),securityRef=db.doc(`user_security/${clientUid}`);
-    const partner=auth.developer.businessType==='api_provider',pricing=await developerApiPricing();
+    const partner=auth.developer.businessType==='api_provider',pricing=await developerApiPricing(),directConfiguredFee=partner?0:await transactionFee('merchant_payment',currency,amount);
     const result=await db.runTransaction(async tx=>{
       const refs=[tx.get(txRef),tx.get(cardRef),tx.get(cardWalletRef),tx.get(developerWalletRef),tx.get(apiRevenueRef),tx.get(securityRef)];
       if(partner)refs.push(tx.get(billingRef));
@@ -161,7 +169,7 @@ export const marketCashApiCardPayment = onRequest({ region: REGION }, async (req
       const cardBalance=Number(cardWallet.data()?.availableBalance||0);
       let platformFee=0,billingAfter:number|null=null,billingModel='percentage_from_received_amount';
       if(partner){if(!billing?.exists||billing.data()?.status!=='active')throw new Error('API_BILLING_ACCOUNT_INACTIVE');const billingBalance=Number(billing.data()?.availableBalance||0);if(billingBalance<pricing.wholesaleUsd)throw new Error('API_BILLING_BALANCE_LOW');platformFee=pricing.wholesaleUsd;billingAfter=roundMoney(billingBalance-platformFee);billingModel='partner_prepaid_flat_per_successful_request';}
-      else platformFee=roundMoney(amount*pricing.directPercent/100);
+      else platformFee=directConfiguredFee;
       const clientFeeAmount=partner?0:platformFee,totalDebited=roundMoney(amount+clientFeeAmount);if(cardBalance<totalDebited)throw new Error('INSUFFICIENT_FUNDS');
       const developerNet=amount;
       const developerBalance=Number(developerWallet.data()?.availableBalance||0),apiRevenueBalance=Number(apiRevenue.data()?.availableBalance||0),now=Date.now(),reference=`MC-PAY-${now}-${randomBytes(3).toString('hex').toUpperCase()}`,cardBalanceAfter=roundMoney(cardBalance-totalDebited),developerBalanceAfter=roundMoney(developerBalance+developerNet),apiRevenueAfter=roundMoney(apiRevenueBalance+platformFee);
