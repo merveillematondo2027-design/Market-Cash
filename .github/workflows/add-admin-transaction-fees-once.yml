@@ -1,0 +1,56 @@
+name: Add admin transaction fees
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/add-admin-transaction-fees-once.yml'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  patch-build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Apply admin fees migration
+        run: python3 scripts/add_admin_transaction_fees.py
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Commit admin fees UI
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/App.tsx src/components/layout/AdminLayout.tsx src/pages/admin/TransactionFees.tsx
+          git commit -m "Add admin transaction fee management" || true
+          git push origin main
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/153173040202/locations/global/workloadIdentityPools/github-actions/providers/market-cash'
+          service_account: 'market-cash-github-deployer@automarket-fintech.iam.gserviceaccount.com'
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Deploy frontend Hosting
+        run: firebase deploy --only hosting --project automarket-fintech --non-interactive
