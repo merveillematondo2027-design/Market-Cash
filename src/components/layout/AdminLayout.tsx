@@ -1,6 +1,6 @@
 import{useState}from'react';
 import{Outlet,Link,useLocation,useNavigate}from'react-router-dom';
-import{Bell,Boxes,Building2,FileClock,HandCoins,LayoutDashboard,Library,Menu,ScrollText,Settings,Shield,ShieldCheck,Truck,User,WalletCards,X}from'lucide-react';
+import{BadgeDollarSign,Bell,Boxes,Building2,FileClock,HandCoins,LayoutDashboard,Library,Menu,ScrollText,Settings,Shield,ShieldCheck,Truck,User,WalletCards,X}from'lucide-react';
 import{cn}from'../../lib/utils';
 import{useAuthStore}from'../../store/authStore';
 import AdminUserWalletAdjustDock from'../admin/AdminUserWalletAdjustDock';
@@ -19,6 +19,7 @@ export default function AdminLayout(){
     {name:'KYC & Comptes',path:'/admin/account-requests',icon:ShieldCheck,group:'Pilotage'},
     {name:'Agents & Float',path:'/admin/agents',icon:HandCoins,group:'Réseau'},
     {name:'Contrôle paiements',path:'/admin/payment-control',icon:Shield,group:'Opérations'},
+    {name:'Frais & commissions',path:'/admin/transaction-fees',icon:BadgeDollarSign,group:'Pilotage'},
     {name:'Demandes',path:'/admin/requests',icon:FileClock,group:'Opérations'},
     {name:'Stock cartes',path:'/admin/stock',icon:Boxes,group:'Opérations'},
     {name:'Livraisons',path:'/admin/deliveries',icon:Truck,group:'Opérations'},
