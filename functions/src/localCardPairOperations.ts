@@ -19,9 +19,16 @@ function publicProvisioningError(error: unknown, uid: string) {
 
 async function verifyPin(uid: string, raw: unknown) {
   const pin = String(raw || '').replace(/\D/g, '');
-  if (!/^\d{4,6}$/.test(pin)) throw new HttpsError('invalid-argument', 'Code secret invalide.');
+  if (!/^\d{4,10}$/.test(pin)) throw new HttpsError('invalid-argument', 'Code secret invalide.');
   const user = await db.doc(`users/${uid}`).get();
   if (!user.exists || String(user.data()?.pinHash || '') !== sha256(pin)) throw new HttpsError('permission-denied', 'Code secret incorrect.');
+}
+
+
+async function verifyBiometricGrant(uid:string){
+  const ref=db.doc(`biometric_grants/${uid}`);const snap=await ref.get();const data=snap.data();
+  if(!snap.exists||Number(data?.expiresAt||0)<Date.now())throw new HttpsError('permission-denied','Vérification biométrique expirée.');
+  await ref.delete();
 }
 
 async function ensureSharedCvv(uid: string) {
@@ -62,7 +69,7 @@ export const getMyLocalCardPairV3 = onCall({ region: REGION }, async request => 
 });
 
 export const revealLocalCardV3 = onCall({ region: REGION }, async request => {
-  const uid = requireAuth(request); await verifyPin(uid, request.data?.pin);
+  const uid = requireAuth(request); if(request.data?.biometric===true)await verifyBiometricGrant(uid);else await verifyPin(uid, request.data?.pin);
   const card = await getOwnedLocalCard(uid, String(request.data?.cardId || ''));
   const { cvv } = await ensureSharedCvv(uid);
   await db.collection('audit_events').add({ actorId: uid, action: 'LOCAL_CARD_V3_REVEALED', cardId: card.cardId, currency: card.currency, result: 'success', createdAt: Date.now() });

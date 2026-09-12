@@ -7,6 +7,7 @@ const finishRegistration=httpsCallable(functions,'finishPasskeyRegistration');
 const beginAuthentication=httpsCallable(functions,'beginPasskeyAuthentication');
 const finishAuthentication=httpsCallable(functions,'finishPasskeyAuthentication');
 const removePasskeys=httpsCallable(functions,'removeMyPasskeys');
+const updatePreferences=httpsCallable(functions,'updateSecurityPreferences');
 
 export const deviceSecurityService={
  supported(){return typeof window!=='undefined'&&window.isSecureContext&&'PublicKeyCredential'in window&&!!navigator.credentials},
@@ -21,4 +22,5 @@ export const deviceSecurityService={
   const begin:any=await beginAuthentication({});const response=await startAuthentication({optionsJSON:begin.data as any});const finish:any=await finishAuthentication({response});if(!finish.data?.verified)throw new Error('Vérification biométrique refusée.');sessionStorage.setItem('marketcash_biometric_verified_at',String(finish.data.verifiedAt||Date.now()));return true;
  },
  async remove(_uid:string){await removePasskeys({});sessionStorage.removeItem('marketcash_biometric_verified_at')},
+ async updatePreferences(input:{securityAutoLockMinutes:number}){const res:any=await updatePreferences(input);return res.data as {securityAutoLockMinutes:number;updatedAt:number}},
 };
